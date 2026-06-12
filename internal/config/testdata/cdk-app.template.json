@@ -1,0 +1,84 @@
+{
+  "Parameters": {
+    "BootstrapVersion": {
+      "Type": "String",
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment"
+    }
+  },
+  "Conditions": {
+    "CDKMetadataAvailable": {
+      "Fn::Or": [
+        {"Fn::Equals": [{"Ref": "AWS::Region"}, "us-east-1"]},
+        {"Fn::Equals": [{"Ref": "AWS::Region"}, "eu-west-1"]}
+      ]
+    }
+  },
+  "Resources": {
+    "AssetsBucket": {
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Retain",
+      "DeletionPolicy": "Retain",
+      "Metadata": {
+        "aws:cdk:path": "CdkStack/AssetsBucket/Resource"
+      }
+    },
+    "AssetsBucketPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": {"Ref": "AssetsBucket"},
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:GetObject",
+              "Effect": "Allow",
+              "Principal": {"Service": "cloudfront.amazonaws.com"},
+              "Resource": {"Fn::Join": ["", [{"Fn::GetAtt": ["AssetsBucket", "Arn"]}, "/*"]]}
+            }
+          ]
+        }
+      }
+    },
+    "OAC": {
+      "Type": "AWS::CloudFront::OriginAccessControl",
+      "Properties": {
+        "OriginAccessControlConfig": {
+          "Name": "my-oac",
+          "OriginAccessControlOriginType": "s3",
+          "SigningBehavior": "always",
+          "SigningProtocol": "sigv4"
+        }
+      }
+    },
+    "CDKMetadata": {
+      "Type": "AWS::CDK::Metadata",
+      "Condition": "CDKMetadataAvailable",
+      "Properties": {
+        "Analytics": "v2:deflate64:H4sIAAAAAAAA"
+      }
+    },
+    "Distribution": {
+      "Type": "AWS::CloudFront::Distribution",
+      "Properties": {
+        "DistributionConfig": {
+          "Enabled": true,
+          "Origins": [
+            {
+              "Id": "s3-origin",
+              "DomainName": {"Fn::GetAtt": ["AssetsBucket", "RegionalDomainName"]},
+              "OriginAccessControlId": {"Fn::GetAtt": ["OAC", "Id"]},
+              "S3OriginConfig": {
+                "OriginAccessIdentity": ""
+              }
+            }
+          ],
+          "DefaultCacheBehavior": {
+            "TargetOriginId": "s3-origin",
+            "ViewerProtocolPolicy": "redirect-to-https",
+            "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6"
+          }
+        }
+      }
+    }
+  }
+}

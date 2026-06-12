@@ -1,0 +1,604 @@
+{
+  "CachePolicies": [
+    {
+      "Id": "2e54312d-136d-493c-8eb9-b001f22f67d2",
+      "CachePolicyConfig": {
+        "Name": "Managed-Amplify",
+        "Comment": "Policy for use with AWS Amplify web apps",
+        "DefaultTTL": 2,
+        "MaxTTL": 600,
+        "MinTTL": 2,
+        "ParametersInCacheKeyAndForwardedToOrigin": {
+          "EnableAcceptEncodingGzip": true,
+          "EnableAcceptEncodingBrotli": false,
+          "HeadersConfig": {
+            "HeaderBehavior": "whitelist",
+            "Headers": {
+              "Items": [
+                "Authorization",
+                "CloudFront-Viewer-Country",
+                "Host"
+              ]
+            }
+          },
+          "CookiesConfig": {
+            "CookieBehavior": "all"
+          },
+          "QueryStringsConfig": {
+            "QueryStringBehavior": "all"
+          }
+        }
+      }
+    },
+    {
+      "Id": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+      "CachePolicyConfig": {
+        "Name": "Managed-CachingDisabled",
+        "Comment": "Disables caching. Useful for dynamic content and non-cacheable requests",
+        "DefaultTTL": 0,
+        "MaxTTL": 0,
+        "MinTTL": 0,
+        "ParametersInCacheKeyAndForwardedToOrigin": {
+          "EnableAcceptEncodingGzip": false,
+          "EnableAcceptEncodingBrotli": false,
+          "HeadersConfig": {
+            "HeaderBehavior": "none"
+          },
+          "CookiesConfig": {
+            "CookieBehavior": "none"
+          },
+          "QueryStringsConfig": {
+            "QueryStringBehavior": "none"
+          }
+        }
+      }
+    },
+    {
+      "Id": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+      "CachePolicyConfig": {
+        "Name": "Managed-CachingOptimized",
+        "Comment": "Optimized for cache efficiency by minimizing cache key values; includes gzip and brotli compression support",
+        "DefaultTTL": 86400,
+        "MaxTTL": 31536000,
+        "MinTTL": 1,
+        "ParametersInCacheKeyAndForwardedToOrigin": {
+          "EnableAcceptEncodingGzip": true,
+          "EnableAcceptEncodingBrotli": true,
+          "HeadersConfig": {
+            "HeaderBehavior": "none"
+          },
+          "CookiesConfig": {
+            "CookieBehavior": "none"
+          },
+          "QueryStringsConfig": {
+            "QueryStringBehavior": "none"
+          }
+        }
+      }
+    },
+    {
+      "Id": "b2884449-e4de-46a7-ac36-70bc7f1ddd6d",
+      "CachePolicyConfig": {
+        "Name": "Managed-CachingOptimizedForUncompressedObjects",
+        "Comment": "Optimized for cache efficiency; identical to CachingOptimized but with compression disabled",
+        "DefaultTTL": 86400,
+        "MaxTTL": 31536000,
+        "MinTTL": 1,
+        "ParametersInCacheKeyAndForwardedToOrigin": {
+          "EnableAcceptEncodingGzip": false,
+          "EnableAcceptEncodingBrotli": false,
+          "HeadersConfig": {
+            "HeaderBehavior": "none"
+          },
+          "CookiesConfig": {
+            "CookieBehavior": "none"
+          },
+          "QueryStringsConfig": {
+            "QueryStringBehavior": "none"
+          }
+        }
+      }
+    },
+    {
+      "Id": "08627262-05a9-4f76-9ded-b50ca2e3a84f",
+      "CachePolicyConfig": {
+        "Name": "Managed-Elemental-MediaPackage",
+        "Comment": "Policy for use with an AWS Elemental MediaPackage origin",
+        "DefaultTTL": 86400,
+        "MaxTTL": 31536000,
+        "MinTTL": 0,
+        "ParametersInCacheKeyAndForwardedToOrigin": {
+          "EnableAcceptEncodingGzip": true,
+          "EnableAcceptEncodingBrotli": false,
+          "HeadersConfig": {
+            "HeaderBehavior": "whitelist",
+            "Headers": {
+              "Items": [
+                "Origin"
+              ]
+            }
+          },
+          "CookiesConfig": {
+            "CookieBehavior": "none"
+          },
+          "QueryStringsConfig": {
+            "QueryStringBehavior": "whitelist",
+            "QueryStrings": {
+              "Items": [
+                "aws.manifestfilter",
+                "end",
+                "m",
+                "start"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "Id": "83da9c7e-98b4-4e11-a168-04f0df8e2c65",
+      "CachePolicyConfig": {
+        "Name": "Managed-UseOriginCacheControlHeaders",
+        "Comment": "Policy for origins that return Cache-Control headers and do not serve different content based on query strings",
+        "DefaultTTL": 0,
+        "MaxTTL": 31536000,
+        "MinTTL": 0,
+        "ParametersInCacheKeyAndForwardedToOrigin": {
+          "EnableAcceptEncodingGzip": true,
+          "EnableAcceptEncodingBrotli": true,
+          "HeadersConfig": {
+            "HeaderBehavior": "whitelist",
+            "Headers": {
+              "Items": [
+                "Host",
+                "Origin",
+                "X-HTTP-Method",
+                "X-HTTP-Method-Override",
+                "X-Method-Override"
+              ]
+            }
+          },
+          "CookiesConfig": {
+            "CookieBehavior": "all"
+          },
+          "QueryStringsConfig": {
+            "QueryStringBehavior": "none"
+          }
+        }
+      }
+    },
+    {
+      "Id": "4cc15a8a-d715-48a4-82b8-cc0b614638fe",
+      "CachePolicyConfig": {
+        "Name": "Managed-UseOriginCacheControlHeaders-QueryStrings",
+        "Comment": "Policy for origins that return Cache-Control headers and serve different content based on query strings",
+        "DefaultTTL": 0,
+        "MaxTTL": 31536000,
+        "MinTTL": 0,
+        "ParametersInCacheKeyAndForwardedToOrigin": {
+          "EnableAcceptEncodingGzip": true,
+          "EnableAcceptEncodingBrotli": true,
+          "HeadersConfig": {
+            "HeaderBehavior": "whitelist",
+            "Headers": {
+              "Items": [
+                "Host",
+                "Origin",
+                "X-HTTP-Method",
+                "X-HTTP-Method-Override",
+                "X-Method-Override"
+              ]
+            }
+          },
+          "CookiesConfig": {
+            "CookieBehavior": "all"
+          },
+          "QueryStringsConfig": {
+            "QueryStringBehavior": "all"
+          }
+        }
+      }
+    }
+  ],
+  "OriginRequestPolicies": [
+    {
+      "Id": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+      "OriginRequestPolicyConfig": {
+        "Name": "Managed-AllViewer",
+        "Comment": "Includes all values (headers, cookies, and query strings) from the viewer request",
+        "HeadersConfig": {
+          "HeaderBehavior": "allViewer"
+        },
+        "CookiesConfig": {
+          "CookieBehavior": "all"
+        },
+        "QueryStringsConfig": {
+          "QueryStringBehavior": "all"
+        }
+      }
+    },
+    {
+      "Id": "33f36d7e-f396-46d9-90e0-52428a34d9dc",
+      "OriginRequestPolicyConfig": {
+        "Name": "Managed-AllViewerAndCloudFrontHeaders-2022-06",
+        "Comment": "Includes all viewer request values and all CloudFront headers released through June 2022",
+        "HeadersConfig": {
+          "HeaderBehavior": "allViewerAndWhitelistCloudFront",
+          "Headers": {
+            "Items": [
+              "CloudFront-Forwarded-Proto",
+              "CloudFront-Is-Android-Viewer",
+              "CloudFront-Is-Desktop-Viewer",
+              "CloudFront-Is-IOS-Viewer",
+              "CloudFront-Is-Mobile-Viewer",
+              "CloudFront-Is-SmartTV-Viewer",
+              "CloudFront-Is-Tablet-Viewer",
+              "CloudFront-Viewer-Address",
+              "CloudFront-Viewer-ASN",
+              "CloudFront-Viewer-City",
+              "CloudFront-Viewer-Country",
+              "CloudFront-Viewer-Country-Name",
+              "CloudFront-Viewer-Country-Region",
+              "CloudFront-Viewer-Country-Region-Name",
+              "CloudFront-Viewer-Http-Version",
+              "CloudFront-Viewer-Latitude",
+              "CloudFront-Viewer-Longitude",
+              "CloudFront-Viewer-Metro-Code",
+              "CloudFront-Viewer-Postal-Code",
+              "CloudFront-Viewer-Time-Zone",
+              "CloudFront-Viewer-TLS"
+            ]
+          }
+        },
+        "CookiesConfig": {
+          "CookieBehavior": "all"
+        },
+        "QueryStringsConfig": {
+          "QueryStringBehavior": "all"
+        }
+      }
+    },
+    {
+      "Id": "b689b0a8-53d0-40ab-baf2-68738e2966ac",
+      "OriginRequestPolicyConfig": {
+        "Name": "Managed-AllViewerExceptHostHeader",
+        "Comment": "Includes all values from the viewer request except the Host header; intended for API Gateway and Lambda function URL origins",
+        "HeadersConfig": {
+          "HeaderBehavior": "allExcept",
+          "Headers": {
+            "Items": [
+              "Host"
+            ]
+          }
+        },
+        "CookiesConfig": {
+          "CookieBehavior": "all"
+        },
+        "QueryStringsConfig": {
+          "QueryStringBehavior": "all"
+        }
+      }
+    },
+    {
+      "Id": "59781a5b-3903-41f3-afcb-af62929ccde1",
+      "OriginRequestPolicyConfig": {
+        "Name": "Managed-CORS-CustomOrigin",
+        "Comment": "Includes the Origin header for CORS requests to a custom origin",
+        "HeadersConfig": {
+          "HeaderBehavior": "whitelist",
+          "Headers": {
+            "Items": [
+              "Origin"
+            ]
+          }
+        },
+        "CookiesConfig": {
+          "CookieBehavior": "none"
+        },
+        "QueryStringsConfig": {
+          "QueryStringBehavior": "none"
+        }
+      }
+    },
+    {
+      "Id": "88a5eaf4-2fd4-4709-b370-b4c650ea3fcf",
+      "OriginRequestPolicyConfig": {
+        "Name": "Managed-CORS-S3Origin",
+        "Comment": "Includes CORS headers for requests to an Amazon S3 bucket origin",
+        "HeadersConfig": {
+          "HeaderBehavior": "whitelist",
+          "Headers": {
+            "Items": [
+              "Access-Control-Request-Headers",
+              "Access-Control-Request-Method",
+              "Origin"
+            ]
+          }
+        },
+        "CookiesConfig": {
+          "CookieBehavior": "none"
+        },
+        "QueryStringsConfig": {
+          "QueryStringBehavior": "none"
+        }
+      }
+    },
+    {
+      "Id": "775133bc-15f2-49f9-abea-afb2e0bf67d2",
+      "OriginRequestPolicyConfig": {
+        "Name": "Managed-Elemental-MediaTailor-PersonalizedManifests",
+        "Comment": "Intended for use with an AWS Elemental MediaTailor endpoint",
+        "HeadersConfig": {
+          "HeaderBehavior": "whitelist",
+          "Headers": {
+            "Items": [
+              "Access-Control-Request-Headers",
+              "Access-Control-Request-Method",
+              "Origin",
+              "User-Agent",
+              "X-Forwarded-For"
+            ]
+          }
+        },
+        "CookiesConfig": {
+          "CookieBehavior": "none"
+        },
+        "QueryStringsConfig": {
+          "QueryStringBehavior": "all"
+        }
+      }
+    },
+    {
+      "Id": "bf0718e1-ba1e-49d1-88b1-f726733018ae",
+      "OriginRequestPolicyConfig": {
+        "Name": "Managed-HostHeaderOnly",
+        "Comment": "Includes only the Host header; no query strings or cookies",
+        "HeadersConfig": {
+          "HeaderBehavior": "whitelist",
+          "Headers": {
+            "Items": [
+              "Host"
+            ]
+          }
+        },
+        "CookiesConfig": {
+          "CookieBehavior": "none"
+        },
+        "QueryStringsConfig": {
+          "QueryStringBehavior": "none"
+        }
+      }
+    },
+    {
+      "Id": "acba4595-bd28-49b8-b9fe-13317c0390fa",
+      "OriginRequestPolicyConfig": {
+        "Name": "Managed-UserAgentRefererHeaders",
+        "Comment": "Includes only the User-Agent and Referer headers; no query strings or cookies",
+        "HeadersConfig": {
+          "HeaderBehavior": "whitelist",
+          "Headers": {
+            "Items": [
+              "Referer",
+              "User-Agent"
+            ]
+          }
+        },
+        "CookiesConfig": {
+          "CookieBehavior": "none"
+        },
+        "QueryStringsConfig": {
+          "QueryStringBehavior": "none"
+        }
+      }
+    }
+  ],
+  "ResponseHeadersPolicies": [
+    {
+      "Id": "e61eb60c-9c35-4d20-a928-2b84e02af89c",
+      "ResponseHeadersPolicyConfig": {
+        "Name": "Managed-CORS-and-SecurityHeadersPolicy",
+        "Comment": "Allows simple CORS requests from any origin and adds security headers; combines SimpleCORS and SecurityHeadersPolicy",
+        "CorsConfig": {
+          "AccessControlAllowCredentials": false,
+          "AccessControlAllowHeaders": {
+            "Items": [
+              "*"
+            ]
+          },
+          "AccessControlAllowMethods": {
+            "Items": [
+              "GET",
+              "HEAD"
+            ]
+          },
+          "AccessControlAllowOrigins": {
+            "Items": [
+              "*"
+            ]
+          },
+          "OriginOverride": false
+        },
+        "SecurityHeadersConfig": {
+          "ReferrerPolicy": {
+            "ReferrerPolicy": "strict-origin-when-cross-origin",
+            "Override": false
+          },
+          "StrictTransportSecurity": {
+            "AccessControlMaxAgeSec": 31536000,
+            "IncludeSubdomains": false,
+            "Preload": false,
+            "Override": false
+          },
+          "ContentTypeOptions": {
+            "Override": true
+          },
+          "FrameOptions": {
+            "FrameOption": "SAMEORIGIN",
+            "Override": false
+          },
+          "XSSProtection": {
+            "Protection": true,
+            "ModeBlock": true,
+            "Override": false
+          }
+        }
+      }
+    },
+    {
+      "Id": "5cc3b908-e619-4b99-88e5-2cf7f45965bd",
+      "ResponseHeadersPolicyConfig": {
+        "Name": "Managed-CORS-With-Preflight",
+        "Comment": "Allows CORS requests from any origin including preflight OPTIONS requests",
+        "CorsConfig": {
+          "AccessControlAllowCredentials": false,
+          "AccessControlAllowHeaders": {
+            "Items": [
+              "*"
+            ]
+          },
+          "AccessControlAllowMethods": {
+            "Items": [
+              "DELETE",
+              "GET",
+              "HEAD",
+              "OPTIONS",
+              "PATCH",
+              "POST",
+              "PUT"
+            ]
+          },
+          "AccessControlAllowOrigins": {
+            "Items": [
+              "*"
+            ]
+          },
+          "AccessControlExposeHeaders": {
+            "Items": [
+              "*"
+            ]
+          },
+          "OriginOverride": false
+        }
+      }
+    },
+    {
+      "Id": "eaab4381-ed33-4a86-88ca-d9558dc6cd63",
+      "ResponseHeadersPolicyConfig": {
+        "Name": "Managed-CORS-with-preflight-and-SecurityHeadersPolicy",
+        "Comment": "Allows CORS requests including preflight from any origin and adds security headers; combines CORS-With-Preflight and SecurityHeadersPolicy",
+        "CorsConfig": {
+          "AccessControlAllowCredentials": false,
+          "AccessControlAllowHeaders": {
+            "Items": [
+              "*"
+            ]
+          },
+          "AccessControlAllowMethods": {
+            "Items": [
+              "DELETE",
+              "GET",
+              "HEAD",
+              "OPTIONS",
+              "PATCH",
+              "POST",
+              "PUT"
+            ]
+          },
+          "AccessControlAllowOrigins": {
+            "Items": [
+              "*"
+            ]
+          },
+          "AccessControlExposeHeaders": {
+            "Items": [
+              "*"
+            ]
+          },
+          "OriginOverride": false
+        },
+        "SecurityHeadersConfig": {
+          "ReferrerPolicy": {
+            "ReferrerPolicy": "strict-origin-when-cross-origin",
+            "Override": false
+          },
+          "StrictTransportSecurity": {
+            "AccessControlMaxAgeSec": 31536000,
+            "IncludeSubdomains": false,
+            "Preload": false,
+            "Override": false
+          },
+          "ContentTypeOptions": {
+            "Override": true
+          },
+          "FrameOptions": {
+            "FrameOption": "SAMEORIGIN",
+            "Override": false
+          },
+          "XSSProtection": {
+            "Protection": true,
+            "ModeBlock": true,
+            "Override": false
+          }
+        }
+      }
+    },
+    {
+      "Id": "67f7725c-6f97-4210-82d7-5512b31e9d03",
+      "ResponseHeadersPolicyConfig": {
+        "Name": "Managed-SecurityHeadersPolicy",
+        "Comment": "Adds a set of security headers to all responses that CloudFront sends to viewers",
+        "SecurityHeadersConfig": {
+          "ReferrerPolicy": {
+            "ReferrerPolicy": "strict-origin-when-cross-origin",
+            "Override": false
+          },
+          "StrictTransportSecurity": {
+            "AccessControlMaxAgeSec": 31536000,
+            "IncludeSubdomains": false,
+            "Preload": false,
+            "Override": false
+          },
+          "ContentTypeOptions": {
+            "Override": true
+          },
+          "FrameOptions": {
+            "FrameOption": "SAMEORIGIN",
+            "Override": false
+          },
+          "XSSProtection": {
+            "Protection": true,
+            "ModeBlock": true,
+            "Override": false
+          }
+        }
+      }
+    },
+    {
+      "Id": "60669652-455b-4ae9-85a4-c4c02393f86c",
+      "ResponseHeadersPolicyConfig": {
+        "Name": "Managed-SimpleCORS",
+        "Comment": "Allows simple CORS requests from any origin by adding Access-Control-Allow-Origin: * header",
+        "CorsConfig": {
+          "AccessControlAllowCredentials": false,
+          "AccessControlAllowHeaders": {
+            "Items": [
+              "*"
+            ]
+          },
+          "AccessControlAllowMethods": {
+            "Items": [
+              "GET",
+              "HEAD"
+            ]
+          },
+          "AccessControlAllowOrigins": {
+            "Items": [
+              "*"
+            ]
+          },
+          "OriginOverride": false
+        }
+      }
+    }
+  ]
+}
