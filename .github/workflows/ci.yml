@@ -29,3 +29,14 @@ jobs:
       - uses: golangci/golangci-lint-action@v8
         with:
           version: latest
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      # Docker is preinstalled on ubuntu-latest runners; the e2e suite drives
+      # the object store container itself and skips if Docker is unavailable.
+      - run: go test -tags e2e ./e2e/...
