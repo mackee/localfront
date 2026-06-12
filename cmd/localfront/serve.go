@@ -14,6 +14,7 @@ import (
 	"github.com/mackee/localfront/internal/cfntmpl"
 	"github.com/mackee/localfront/internal/config"
 	"github.com/mackee/localfront/internal/dataplane"
+	"github.com/mackee/localfront/internal/origin"
 )
 
 func serve(ctx context.Context, opts *serveOptions, logger *slog.Logger) error {
@@ -33,7 +34,20 @@ func serve(ctx context.Context, opts *serveOptions, logger *slog.Logger) error {
 		logger.Warn(warning)
 	}
 
-	server := dataplane.New(cfg, logger)
+	var dpOpts []dataplane.Option
+	if configUsesS3(cfg) {
+		if opts.s3Endpoint == "" {
+			return fmt.Errorf("the templates use S3 origins; provide --s3-endpoint (and --s3-access-key / --s3-secret-key) for the object store")
+		}
+		client, err := origin.NewS3Client(opts.s3Endpoint, opts.s3Region, opts.s3Access, opts.s3Secret, nil)
+		if err != nil {
+			return err
+		}
+		dpOpts = append(dpOpts, dataplane.WithS3Fetcher(client))
+		logger.Info("S3 origins enabled", "endpoint", opts.s3Endpoint, "region", opts.s3Region)
+	}
+
+	server := dataplane.New(cfg, logger, dpOpts...)
 	httpServer := &http.Server{
 		Handler:           server,
 		ReadHeaderTimeout: 30 * time.Second,
@@ -75,6 +89,18 @@ func serve(ctx context.Context, opts *serveOptions, logger *slog.Logger) error {
 		}
 		return nil
 	}
+}
+
+// configUsesS3 reports whether any distribution has an S3 origin.
+func configUsesS3(cfg *config.Config) bool {
+	for _, d := range cfg.Distributions {
+		for _, o := range d.Origins {
+			if o.S3 != nil {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // displayAddr turns a listener address into something clickable.

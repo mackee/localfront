@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 
 	"github.com/mackee/localfront/internal/config"
+	"github.com/mackee/localfront/internal/origin"
 )
 
 // Server serves the data plane for one Config. The active configuration is
@@ -19,13 +20,26 @@ type Server struct {
 	logger    *slog.Logger
 	routes    atomic.Pointer[routeTable]
 	transport http.RoundTripper
+	s3        origin.Fetcher
+}
+
+// Option configures a Server.
+type Option func(*Server)
+
+// WithS3Fetcher sets the fetcher used to serve S3 origins. Without one, S3
+// origins respond with 502.
+func WithS3Fetcher(f origin.Fetcher) Option {
+	return func(s *Server) { s.s3 = f }
 }
 
 // New returns a Server serving cfg.
-func New(cfg *config.Config, logger *slog.Logger) *Server {
+func New(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server {
 	s := &Server{
 		logger:    logger,
 		transport: newTransport(),
+	}
+	for _, opt := range opts {
+		opt(s)
 	}
 	s.SwapConfig(cfg)
 	return s
@@ -108,10 +122,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case behavior.Origin.Custom != nil:
 		s.proxyCustomOrigin(w, r, dist, behavior, requestID)
 	case behavior.Origin.S3 != nil:
-		// S3 origins are implemented in milestone M3.
-		s.logger.Warn("S3 origins are not implemented yet", "origin", behavior.Origin.ID)
-		writeCFError(w, http.StatusBadGateway, requestID,
-			"localfront cannot serve this origin yet: S3 origins are not implemented.")
+		s.proxyS3Origin(w, r, dist, behavior, requestID)
 	default:
 		writeCFError(w, http.StatusInternalServerError, requestID, "The origin has no usable configuration.")
 	}

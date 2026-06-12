@@ -7,7 +7,7 @@
 |---|---|---|---|---|
 | 1 | 署名付き URL / Cookie 検証と viewer-request function の実行順序 | 未実装（M5/M6） | 署名検証が function の前か後か（function で URI を書き換えた場合に署名対象がどちらの URI か） | 未検証 |
 | 2 | 非許可メソッドへの応答 | 403 + 「could not be satisfied」ページ | 実 CloudFront が 403 か 405 か、本文・`Allow` ヘッダの有無 | 未検証 |
-| 3 | S3 オリジンの `NoSuchKey` | 404 に倒す予定（M3） | 実挙動は OAC の ListBucket 権限有無で 403/404 が変わる。OAC 非強制の localfront は 404 固定で良いか | 方針決定済み・実機未対照 |
+| 3 | S3 オリジンの `NoSuchKey` | レスポンスをそのまま透過（起動時クレデンシャルは全アクセス権を持つため欠損キーは 404 NoSuchKey で返る、AccessDenied は 403） | 実 CloudFront は OAC の ListBucket 権限有無で 403/404 が変わる。OAC 非強制の localfront では「ストアが返す素のステータスを透過」=実質 404。実 CloudFront の素の S3 エラーページ本文との細部差分は未対照 | RustFS で 404/206/304 の透過を確認済み（M3 e2e）。実 CloudFront 本文は未対照 |
 | 4 | 未知 Host への応答 | 403 + CF 風 HTML | 実 CloudFront の 403 本文・ヘッダ（`Server: CloudFront` 等）との細部差分 | 未検証 |
 | 5 | match-viewer プロトコルポリシー | viewer 側が常に HTTP のため http 固定 | TLS 終端（roadmap）導入時に https 移行 | 設計どおり |
 | 6 | オリジンへの `Host` ヘッダ | 常にオリジンドメインに置換（M2） | cache/origin-request ポリシーで viewer Host を転送する場合の挙動（M4 で policy 駆動に変更予定） | M4 で対応 |
