@@ -28,7 +28,8 @@ jobs:
           go-version-file: go.mod
       - uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          # Pinned to match aqua.yaml (local installs the same via `aqua i`).
+          version: v2.12.2
 
   e2e:
     runs-on: ubuntu-latest
