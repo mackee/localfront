@@ -126,7 +126,7 @@ func TestS3Key(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────
-// B8: s3CacheStatus table test (unexported)
+// B8: cacheStatus table test (unexported)
 // ─────────────────────────────────────────────────
 
 func TestS3CacheStatus(t *testing.T) {
@@ -144,9 +144,9 @@ func TestS3CacheStatus(t *testing.T) {
 		{500, "Error from localfront"},
 	}
 	for _, tc := range tests {
-		got := s3CacheStatus(tc.status)
+		got := cacheStatus(tc.status)
 		if got != tc.want {
-			t.Errorf("s3CacheStatus(%d) = %q, want %q", tc.status, got, tc.want)
+			t.Errorf("cacheStatus(%d) = %q, want %q", tc.status, got, tc.want)
 		}
 	}
 }

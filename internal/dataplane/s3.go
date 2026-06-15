@@ -2,11 +2,11 @@ package dataplane
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/mackee/localfront/internal/behavior"
 	"github.com/mackee/localfront/internal/config"
 	"github.com/mackee/localfront/internal/origin"
 )
@@ -14,45 +14,47 @@ import (
 // s3RequestTimeout bounds a single origin fetch from the object store.
 const s3RequestTimeout = 30 * time.Second
 
-func (s *Server) proxyS3Origin(w http.ResponseWriter, r *http.Request, dist *config.Distribution, behavior *config.Behavior, requestID string) {
+func (s *Server) fetchS3Origin(ctx context.Context, r *http.Request, dist *config.Distribution, beh *config.Behavior, originReq behavior.OriginRequest, requestID string) *originResponse {
 	if s.s3 == nil {
-		s.logger.Error("S3 origin requested but no object store is configured", "origin", behavior.Origin.ID)
-		writeCFError(w, http.StatusBadGateway, requestID,
-			"This distribution has an S3 origin, but localfront was started without an S3 store (set --s3-endpoint).")
-		return
+		s.logger.Error("S3 origin requested but no object store is configured", "origin", beh.Origin.ID)
+		return s.s3UnconfiguredResponse()
 	}
-	o := behavior.Origin
+	o := beh.Origin
 	key := s3Key(o.OriginPath, r.URL.Path, dist.DefaultRootObject)
 
-	ctx, cancel := context.WithTimeout(r.Context(), s3RequestTimeout)
-	defer cancel()
+	// S3 origins receive the policy-selected headers plus the always-forwarded
+	// Range and conditional headers.
+	headers := http.Header{}
+	for name, values := range originReq.Headers {
+		headers[name] = append([]string(nil), values...)
+	}
+	addAlwaysForwardedHeaders(headers, r.Header)
 
-	resp, err := s.s3.Fetch(ctx, &origin.Request{
+	reqCtx, cancel := context.WithTimeout(ctx, s3RequestTimeout)
+	resp, err := s.s3.Fetch(reqCtx, &origin.Request{
 		Bucket:  o.S3.Bucket,
 		Key:     key,
 		Method:  r.Method,
-		Headers: origin.CollectForwardedHeaders(r.Header),
+		Headers: headers,
 	})
 	if err != nil {
+		cancel()
 		s.logger.Error("S3 origin fetch failed", "origin", o.ID, "bucket", o.S3.Bucket, "key", key, "error", err)
-		writeCFError(w, http.StatusBadGateway, requestID,
-			"localfront wasn't able to fetch the object from the S3 origin.")
-		return
+		return nil
 	}
-	defer func() { _ = resp.Body.Close() }()
+	return &originResponse{
+		statusCode: resp.StatusCode,
+		header:     resp.Header,
+		body:       &cancelOnClose{ReadCloser: resp.Body, cancel: cancel},
+	}
+}
 
-	copyHeaders(w.Header(), resp.Header)
-	removeHopByHopHeaders(w.Header())
-	addVia(w.Header(), dist.DomainName)
-	w.Header().Set("X-Cache", s3CacheStatus(resp.StatusCode))
-	w.Header().Set("X-Amz-Cf-Id", requestID)
-	w.Header().Set("X-Amz-Cf-Pop", popName)
-	w.WriteHeader(resp.StatusCode)
-	if r.Method != http.MethodHead {
-		if _, err := io.Copy(w, resp.Body); err != nil {
-			s.logger.Debug("copying S3 response failed", "error", err)
-		}
-	}
+// s3UnconfiguredResponse synthesizes the 502 served when a distribution has an
+// S3 origin but localfront was started without an object store.
+func (s *Server) s3UnconfiguredResponse() *originResponse {
+	const msg = "This distribution has an S3 origin, but localfront was started without an S3 store (set --s3-endpoint)."
+	body, header := cfErrorPage(http.StatusBadGateway, "", msg)
+	return &originResponse{statusCode: http.StatusBadGateway, header: header, body: body}
 }
 
 // s3Key derives the object key from the origin path and request path, applying
@@ -63,11 +65,4 @@ func s3Key(originPath, urlPath, defaultRootObject string) string {
 		urlPath = "/" + defaultRootObject
 	}
 	return strings.TrimPrefix(originPath+urlPath, "/")
-}
-
-func s3CacheStatus(status int) string {
-	if status >= 400 {
-		return "Error from localfront"
-	}
-	return "Miss from localfront"
 }

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/mackee/localfront/internal/behavior"
 	"github.com/mackee/localfront/internal/config"
 )
 
@@ -16,16 +17,19 @@ func newTransport() *http.Transport {
 		Proxy: http.ProxyFromEnvironment,
 		// Fidelity note: CloudFront's origin connection timeout defaults to
 		// 10 seconds; per-origin ConnectionTimeout/ConnectionAttempts are not
-		// wired into the dialer yet (TODO M4).
-		DialContext:       (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+		// wired into the dialer yet.
+		DialContext:       (&net.Dialer{Timeout: customOriginDialTimeout}).DialContext,
 		ForceAttemptHTTP2: true,
 		MaxIdleConns:      100,
 		IdleConnTimeout:   90 * time.Second,
 	}
 }
 
-func (s *Server) proxyCustomOrigin(w http.ResponseWriter, r *http.Request, dist *config.Distribution, behavior *config.Behavior, requestID string) {
-	origin := behavior.Origin
+// fetchCustomOrigin proxies the request to a custom HTTP(S) origin, sending
+// only the viewer values selected by the behavior's policies plus the headers
+// CloudFront sets itself.
+func (s *Server) fetchCustomOrigin(ctx context.Context, r *http.Request, dist *config.Distribution, beh *config.Behavior, originReq behavior.OriginRequest, requestID string) *originResponse {
+	origin := beh.Origin
 	co := origin.Custom
 
 	scheme := "http"
@@ -49,46 +53,69 @@ func (s *Server) proxyCustomOrigin(w http.ResponseWriter, r *http.Request, dist 
 	if r.URL.RawPath != "" {
 		outURL.RawPath = origin.OriginPath + r.URL.RawPath
 	}
-	// TODO(M4): cache policy / origin request policy decide which headers,
-	// cookies, and query strings reach the origin; M2 forwards everything.
+	outURL.RawQuery = originReq.RawQuery
 
-	ctx, cancel := context.WithTimeout(r.Context(), co.ReadTimeout)
-	defer cancel()
-	out, err := http.NewRequestWithContext(ctx, r.Method, outURL.String(), r.Body)
+	reqCtx, cancel := context.WithTimeout(ctx, co.ReadTimeout)
+	out, err := http.NewRequestWithContext(reqCtx, r.Method, outURL.String(), r.Body)
 	if err != nil {
+		cancel()
 		s.logger.Error("building origin request failed", "error", err)
-		writeCFError(w, http.StatusInternalServerError, requestID, "localfront failed to build the origin request.")
-		return
+		return nil
 	}
 	out.ContentLength = r.ContentLength
 
-	copyHeaders(out.Header, r.Header)
+	for name, values := range originReq.Headers {
+		out.Header[name] = append([]string(nil), values...)
+	}
+	addAlwaysForwardedHeaders(out.Header, r.Header)
 	removeHopByHopHeaders(out.Header)
+	if originReq.AcceptEncoding != "" {
+		out.Header.Set("Accept-Encoding", originReq.AcceptEncoding)
+	}
+
 	out.Host = co.Host
+	if originReq.ForwardHost {
+		out.Host = r.Host
+	}
 	for _, h := range origin.CustomHeaders {
 		out.Header.Set(h.Name, h.Value)
 	}
-	appendXForwardedFor(out.Header, r.RemoteAddr)
+	appendXForwardedFor(out.Header, r.Header.Get("X-Forwarded-For"), r.RemoteAddr)
 	out.Header.Set("X-Amz-Cf-Id", requestID)
 	addVia(out.Header, dist.DomainName)
 
 	resp, err := s.transport.RoundTrip(out)
 	if err != nil {
+		cancel()
 		s.logger.Error("origin fetch failed", "origin", origin.ID, "url", outURL.String(), "error", err)
-		writeCFError(w, http.StatusBadGateway, requestID,
-			"localfront wasn't able to connect to the origin.")
-		return
+		return nil
 	}
-	defer func() { _ = resp.Body.Close() }()
+	return &originResponse{
+		statusCode: resp.StatusCode,
+		header:     resp.Header,
+		body:       &cancelOnClose{ReadCloser: resp.Body, cancel: cancel},
+	}
+}
 
-	copyHeaders(w.Header(), resp.Header)
-	removeHopByHopHeaders(w.Header())
-	addVia(w.Header(), dist.DomainName)
-	w.Header().Set("X-Cache", "Miss from localfront")
-	w.Header().Set("X-Amz-Cf-Id", requestID)
-	w.Header().Set("X-Amz-Cf-Pop", popName)
-	w.WriteHeader(resp.StatusCode)
-	if _, err := io.Copy(w, resp.Body); err != nil {
-		s.logger.Debug("copying origin response failed", "error", err)
+// addAlwaysForwardedHeaders copies the headers CloudFront forwards to origins
+// regardless of policy (Range and conditional headers).
+func addAlwaysForwardedHeaders(dst, src http.Header) {
+	for _, name := range alwaysForwardedHeaders {
+		if v := src.Values(name); len(v) > 0 {
+			dst[http.CanonicalHeaderKey(name)] = append([]string(nil), v...)
+		}
 	}
+}
+
+// cancelOnClose cancels the per-request context when the body is closed, so the
+// read timeout does not leak past the response lifetime.
+type cancelOnClose struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnClose) Close() error {
+	err := c.ReadCloser.Close()
+	c.cancel()
+	return err
 }

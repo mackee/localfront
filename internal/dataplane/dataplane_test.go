@@ -281,6 +281,8 @@ func TestProxy_OriginPath(t *testing.T) {
 		},
 	}
 	dist := baseDistribution("D1", "d1.cloudfront.localhost", []string{"assets.example.test"}, origin)
+	// Forward all query strings to the origin (CachingOptimized would strip them).
+	dist.DefaultBehavior.CachePolicy.QueryStrings = config.ListSelection{Behavior: "all"}
 	cfg := &config.Config{Distributions: []*config.Distribution{dist}}
 	srv := dataplane.New(cfg, newLogger())
 

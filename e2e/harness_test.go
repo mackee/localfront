@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -274,9 +275,7 @@ var dataPlaneLine = regexp.MustCompile(`data plane\s+(http://\S+)`)
 // start builds and launches localfront against the given template and store.
 func startLocalfront(t *testing.T, templatePath string, st *store) *localfront {
 	t.Helper()
-	bin := buildBinary(t)
-
-	cmd := exec.Command(bin, "serve",
+	return startLocalfrontArgs(t, "serve",
 		"--template", templatePath,
 		"--listen", "127.0.0.1:0",
 		"--s3-endpoint", st.endpoint,
@@ -284,6 +283,15 @@ func startLocalfront(t *testing.T, templatePath string, st *store) *localfront {
 		"--s3-access-key", accessKey,
 		"--s3-secret-key", secretKey,
 	)
+}
+
+// startLocalfrontArgs builds (once) and launches the binary with the given
+// argv, returning a handle once it prints its data plane URL and is ready.
+func startLocalfrontArgs(t *testing.T, args ...string) *localfront {
+	t.Helper()
+	bin := buildBinary(t)
+
+	cmd := exec.Command(bin, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatalf("stdout pipe: %v", err)
@@ -371,14 +379,33 @@ func (lf *localfront) get(t *testing.T, method, host, path string, headers map[s
 	return resp
 }
 
+var (
+	buildOnce sync.Once
+	builtBin  string
+	buildErr  error
+)
+
+// buildBinary builds the localfront binary once per test run and caches it.
 func buildBinary(t *testing.T) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "localfront")
-	cmd := exec.Command("go", "build", "-o", bin, "github.com/mackee/localfront/cmd/localfront")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("building localfront: %v\n%s", err, out)
+	buildOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "localfront-e2e-bin")
+		if err != nil {
+			buildErr = err
+			return
+		}
+		bin := filepath.Join(dir, "localfront")
+		cmd := exec.Command("go", "build", "-o", bin, "github.com/mackee/localfront/cmd/localfront")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			buildErr = fmt.Errorf("building localfront: %v\n%s", err, out)
+			return
+		}
+		builtBin = bin
+	})
+	if buildErr != nil {
+		t.Fatalf("%v", buildErr)
 	}
-	return bin
+	return builtBin
 }
 
 // repoFile resolves a path relative to the repository root.

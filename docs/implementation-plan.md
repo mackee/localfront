@@ -2,6 +2,14 @@
 
 README.md で定義した PoC スコープを実装するための計画。各マイルストーンに検証用テストを含め、最後に現実世界のユースケースに沿った統合テストシナリオを定義する。
 
+## 実装状況（2026-06 時点）
+
+M0–M8 すべて実装済み。確定した技術選定・設計判断は [design-decisions.md](./design-decisions.md)、実 CloudFront での要検証項目は [fidelity-notes.md](./fidelity-notes.md) に集約している。計画から変わった主な点:
+
+- **追加依存**: JS エンジン `github.com/fastschema/qjs`（+ wazero）、圧縮 `github.com/andybalholm/brotli`、ホットリロード `github.com/fsnotify/fsnotify`、署名検証テストのオラクル `aws-sdk-go-v2/feature/cloudfront/sign`（テストのみ）。いずれも cgo 非依存。
+- **パッケージ追加**: `internal/behavior`（path/policy/CORS/圧縮/viewer ヘッダ）、`internal/sign`（署名付き URL/Cookie）。
+- **e2e**: docker 必須の S3 シナリオ（`s3_origin_test.go`）に加え、カスタムオリジンで docker 不要のシナリオ（`customorigin_test.go`: Functions+KVS / CORS / マルチ distribution / geo）を追加。`examples/` に spa-hosting / static-and-api / functions / cors-security を整備。
+
 ## 全体方針
 
 - **早期に縦のスライスを貫通させる**: 「テンプレート読み込み → 1 distribution → カスタムオリジンに proxy → curl で確認」を最初の 2 マイルストーンで成立させ、以降は機能を肉付けする。

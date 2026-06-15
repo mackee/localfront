@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"html"
+	"io"
 	"net"
 	"net/http"
 	"net/textproto"
@@ -56,12 +57,16 @@ func removeHopByHopHeaders(h http.Header) {
 	}
 }
 
-func appendXForwardedFor(h http.Header, remoteAddr string) {
+// appendXForwardedFor sets X-Forwarded-For to the viewer's prior value (if any)
+// with the viewer IP appended. CloudFront always does this, independent of the
+// cache / origin request policy, so prior comes from the original viewer
+// request rather than the policy-filtered header set.
+func appendXForwardedFor(h http.Header, prior, remoteAddr string) {
 	ip, _, err := net.SplitHostPort(remoteAddr)
 	if err != nil {
 		ip = remoteAddr
 	}
-	if prior := h.Get("X-Forwarded-For"); prior != "" {
+	if prior != "" {
 		ip = prior + ", " + ip
 	}
 	h.Set("X-Forwarded-For", ip)
@@ -78,12 +83,23 @@ func addVia(h http.Header, domain string) {
 // writeCFError renders an error page shaped like CloudFront's
 // "The request could not be satisfied" responses.
 func writeCFError(w http.ResponseWriter, status int, requestID, message string) {
-	w.Header().Set("Content-Type", "text/html")
-	w.Header().Set("Server", "CloudFront")
-	w.Header().Set("X-Cache", "Error from localfront")
-	w.Header().Set("X-Amz-Cf-Id", requestID)
+	body, header := cfErrorPage(status, requestID, message)
+	for k, vv := range header {
+		w.Header()[k] = vv
+	}
 	w.WriteHeader(status)
-	fmt.Fprintf(w, `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+	_, _ = io.Copy(w, body)
+}
+
+// cfErrorPage builds the body and headers of a CloudFront-shaped error page so
+// it can either be written directly or flow through the response pipeline.
+func cfErrorPage(status int, requestID, message string) (io.ReadCloser, http.Header) {
+	header := http.Header{}
+	header.Set("Content-Type", "text/html")
+	header.Set("Server", "CloudFront")
+	header.Set("X-Cache", "Error from localfront")
+	header.Set("X-Amz-Cf-Id", requestID)
+	body := fmt.Sprintf(`<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
 <HTML><HEAD><META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
 <TITLE>ERROR: The request could not be satisfied</TITLE>
 </HEAD><BODY>
@@ -103,4 +119,5 @@ Request ID: %s
 </ADDRESS>
 </BODY></HTML>
 `, status, html.EscapeString(message), html.EscapeString(requestID))
+	return io.NopCloser(strings.NewReader(body)), header
 }

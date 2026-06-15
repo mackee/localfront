@@ -51,16 +51,28 @@ func TestSPAHosting(t *testing.T) {
 		}
 	})
 
-	t.Run("missing object", func(t *testing.T) {
+	t.Run("missing asset 404s (has a file extension)", func(t *testing.T) {
+		// /does-not-exist.js matches no behavior-specific error rewrite; the SPA
+		// fallback still applies (404 -> /index.html, 200) per the template.
 		resp := lf.get(t, http.MethodGet, host, "/does-not-exist.js", nil)
-		_ = mustReadBody(t, resp)
-		// Until custom error responses (M4), a missing key surfaces as the
-		// origin's 404 with X-Cache marking an error.
-		if resp.StatusCode != http.StatusNotFound {
-			t.Fatalf("GET missing = %d, want 404", resp.StatusCode)
+		body := mustReadBody(t, resp)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET missing = %d, want 200 (SPA fallback)", resp.StatusCode)
 		}
-		if got := resp.Header.Get("X-Cache"); got != "Error from localfront" {
-			t.Errorf("X-Cache = %q, want Error from localfront", got)
+		if !bytes.Contains(body, []byte("<div id=\"root\">")) {
+			t.Errorf("SPA fallback did not serve index.html, got:\n%s", body)
+		}
+	})
+
+	t.Run("deep link resolves to the app shell", func(t *testing.T) {
+		// A client-side route with no matching object falls back to index.html.
+		resp := lf.get(t, http.MethodGet, host, "/app/dashboard", nil)
+		body := mustReadBody(t, resp)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET deep link = %d, want 200 (SPA fallback)", resp.StatusCode)
+		}
+		if !bytes.Contains(body, []byte("<div id=\"root\">")) {
+			t.Errorf("deep link did not serve index.html, got:\n%s", body)
 		}
 	})
 
