@@ -1,0 +1,44 @@
+# runn scenario verifying the spa-hosting example end to end.
+#
+#   LF_ENDPOINT=http://127.0.0.1:8080 runn run examples/spa-hosting/scenario.yaml
+#
+# Driven by `task verify:spa`, which brings up the object store (docker compose),
+# seeds it, starts localfront on the host, then runs this scenario.
+desc: spa-hosting example — default root object, asset content type, and SPA fallback
+labels:
+  - localfront
+  - examples
+runners:
+  req:
+    endpoint: ${LF_ENDPOINT:-http://127.0.0.1:8080}
+steps:
+  root:
+    desc: the default root object is served at /
+    req:
+      /:
+        get:
+          headers:
+            Host: spa.example.test
+          body: null
+    test: |
+      current.res.status == 200 && indexOf(current.res.rawBody, "<div id=\"root\">") != -1
+  asset:
+    desc: a nested asset is served with a javascript content type
+    req:
+      /assets/app.js:
+        get:
+          headers:
+            Host: spa.example.test
+          body: null
+    test: |
+      current.res.status == 200 && indexOf(current.res.headers["Content-Type"][0], "javascript") != -1 && indexOf(current.res.rawBody, "Hello from the localfront SPA example") != -1
+  deep_link:
+    desc: a client-side route with no object falls back to index.html (custom error response)
+    req:
+      /app/dashboard:
+        get:
+          headers:
+            Host: spa.example.test
+          body: null
+    test: |
+      current.res.status == 200 && indexOf(current.res.rawBody, "<div id=\"root\">") != -1

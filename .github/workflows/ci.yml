@@ -37,6 +37,14 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      # Docker is preinstalled on ubuntu-latest runners; the e2e suite drives
-      # the object store container itself and skips if Docker is unavailable.
+      # Install the dev tools from aqua.yaml (task, runn) so the runn example
+      # scenarios run instead of skipping.
+      - uses: aquaproj/aqua-installer@v3.1.1
+        with:
+          aqua_version: v2.56.1
+      # Docker is preinstalled on ubuntu-latest runners; the Go e2e suite drives
+      # the object store container itself (dockertest) and skips if Docker is
+      # unavailable.
       - run: go test -tags e2e ./e2e/...
+      # The S3-backed examples are verified with docker-compose + runn.
+      - run: task verify:examples

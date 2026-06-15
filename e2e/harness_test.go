@@ -225,46 +225,6 @@ func (s *store) put(t *testing.T, bucket, key, contentType string, body []byte) 
 	t.Fatalf("PUT %s returned %d: %s", u, lastStatus, lastMsg)
 }
 
-// putDir uploads every file under localDir into bucket, keyed by its relative
-// path, guessing a Content-Type from the extension.
-func (s *store) putDir(t *testing.T, bucket, localDir string) {
-	t.Helper()
-	s.put(t, bucket, "", "", nil) // create bucket
-	err := filepath.WalkDir(localDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		rel, err := filepath.Rel(localDir, path)
-		if err != nil {
-			return err
-		}
-		body, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		s.put(t, bucket, filepath.ToSlash(rel), contentTypeFor(rel), body)
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("uploading %s: %v", localDir, err)
-	}
-}
-
-func contentTypeFor(name string) string {
-	switch {
-	case strings.HasSuffix(name, ".html"):
-		return "text/html"
-	case strings.HasSuffix(name, ".js"):
-		return "application/javascript"
-	case strings.HasSuffix(name, ".css"):
-		return "text/css"
-	case strings.HasSuffix(name, ".json"):
-		return "application/json"
-	default:
-		return "application/octet-stream"
-	}
-}
-
 // localfront is a running localfront subprocess.
 type localfront struct {
 	baseURL string

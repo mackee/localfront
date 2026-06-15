@@ -21,8 +21,11 @@
 - **入手方法**: **aqua 管理の CLI**（`aqua.yaml` に `k1LoW/runn`）。go.mod には入れない — runn は依存ツリーが重く、ランタイムにもユニットテストにも不要なため。`runn` バイナリは PATH 経由で使う。
 - **配置**: シナリオは `examples/<name>/scenario.yaml`（テンプレートの隣 = 自己文書化）。`runners.req.endpoint: ${LF_ENDPOINT}` で対象を切り替え、`runn run` 単体でも実行可能。
 - **ホストルーティング**: localfront は Host ヘッダで distribution を解決する。runn の HTTP runner は `headers.Host` を `req.Host` に反映する（`http.go`）ので、各ステップで `Host: <alias>` を指定すればローカルの 127.0.0.1:port 宛でも正しい distribution に届く。
-- **オーケストレーション**: e2e Go テスト（`e2e/examples_runn_test.go`、`e2e` タグ）が echo オリジン + localfront を起動し、`LF_ENDPOINT` を渡して `runn run scenario.yaml` を実行（CWD をシナリオのディレクトリにして runn の `read:parent` scope を回避）。runn が PATH に無ければ `t.Skip`。オリジンのポートだけ環境依存なのでテンプレートの `HTTPPort: 3000` を実ポートに置換する（テンプレートの構造・Function・ポリシーはそのまま検証対象）。
-- **対象**: 現状 functions（URL 正規化 / リダイレクト / KVS フラグ）と cors-security（プリフライト / CORS / セキュリティヘッダ）。S3 を要する例（spa-hosting / static-and-api）は dockertest 駆動の Go e2e でカバー。
+- **オーケストレーション（2 方式）**:
+  - **カスタムオリジンの例**（functions / cors-security）: 依存が軽いので e2e Go テスト（`e2e/examples_runn_test.go`、`e2e` タグ）が httptest の echo オリジン + localfront を起動し、`LF_ENDPOINT` を渡して `runn run scenario.yaml` を実行（CWD をシナリオのディレクトリにして runn の `read:parent` scope を回避）。**Docker 不要**。オリジンのポートだけ環境依存なのでテンプレートの `HTTPPort: 3000` を実ポートに置換する（テンプレートの構造・Function・ポリシーはそのまま検証対象）。
+  - **S3 を要する例**（spa-hosting / static-and-api）: 各例に `compose.yaml`（RustFS + mc シード、static-and-api は `http-echo` バックエンドも）を同梱し、`scripts/verify-example.sh`（`task verify:spa` / `verify:static-and-api` が起動）が compose up → シード → localfront をホストで起動 → `runn run` → teardown する。README の「依存は Docker、localfront はホスト」という使い方そのままを検証する。
+- **runn が無いとき**: Go テストは `t.Skip`。
+- **タスクランナー**: Makefile を廃し [Taskfile](https://taskfile.dev)（`Taskfile.yml`、`go-task/task` も aqua 管理）に統一。`task build/test/e2e/lint/verify:examples`。CI の e2e ジョブは aqua で task/runn を入れ、`go test -tags e2e` と `task verify:examples` の両方を実行する。
 
 ## CFN パーサ: goformation 不採用、yaml.v3 + 自前実装（2026-06 確定）
 
