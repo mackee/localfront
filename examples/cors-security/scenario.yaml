@@ -1,0 +1,37 @@
+# runn scenario verifying the cors-security example end to end.
+#
+#   LF_ENDPOINT=http://127.0.0.1:<port> runn run examples/cors-security/scenario.yaml
+#
+# Driven by the e2e test (go test -tags e2e ./e2e/...), which starts an echo
+# origin (answering OPTIONS with 204) and localfront.
+desc: cors-security example — CORS preflight, CORS on the actual request, and security headers
+labels:
+  - localfront
+  - examples
+runners:
+  req:
+    endpoint: ${LF_ENDPOINT:-http://127.0.0.1:8080}
+steps:
+  preflight:
+    desc: an OPTIONS preflight comes back with the policy's Access-Control-Allow-Origin
+    req:
+      /data:
+        options:
+          headers:
+            Host: api.example.test
+            Origin: https://app.example.test
+            Access-Control-Request-Method: GET
+          body: null
+    test: |
+      current.res.headers["Access-Control-Allow-Origin"][0] == "*"
+  actual_request:
+    desc: a real CORS request carries both CORS and security headers
+    req:
+      /data:
+        get:
+          headers:
+            Host: api.example.test
+            Origin: https://app.example.test
+          body: null
+    test: |
+      current.res.status == 200 && current.res.headers["Access-Control-Allow-Origin"][0] == "*" && current.res.headers["X-Content-Type-Options"][0] == "nosniff" && hasPrefix(current.res.headers["Strict-Transport-Security"][0], "max-age=")

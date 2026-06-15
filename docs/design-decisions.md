@@ -14,6 +14,16 @@
 - イメージは `LOCALFRONT_E2E_S3_IMAGE` で差し替え可能（MinIO 互換へのフォールバック）。Docker 不在時は `dockertest.NewPool` / `Ping` 失敗で `t.Skip`。
 - フィクスチャ投入（バケット作成・オブジェクト PUT）は S3 クライアントと同じ aws-sdk-go-v2 SigV4 署名器を流用。空ボディは `Content-Length: 0` 明示、書き込みは 503 リトライ付き。
 
+## examples の検証: runn（aqua 管理の CLI）（2026-06 確定）
+
+`examples/` の各テンプレートが「動くドキュメント」であることを保証するため、宣言的シナリオランナー [runn](https://github.com/k1LoW/runn) で実バイナリ越しに検証する。
+
+- **入手方法**: **aqua 管理の CLI**（`aqua.yaml` に `k1LoW/runn`）。go.mod には入れない — runn は依存ツリーが重く、ランタイムにもユニットテストにも不要なため。`runn` バイナリは PATH 経由で使う。
+- **配置**: シナリオは `examples/<name>/scenario.yaml`（テンプレートの隣 = 自己文書化）。`runners.req.endpoint: ${LF_ENDPOINT}` で対象を切り替え、`runn run` 単体でも実行可能。
+- **ホストルーティング**: localfront は Host ヘッダで distribution を解決する。runn の HTTP runner は `headers.Host` を `req.Host` に反映する（`http.go`）ので、各ステップで `Host: <alias>` を指定すればローカルの 127.0.0.1:port 宛でも正しい distribution に届く。
+- **オーケストレーション**: e2e Go テスト（`e2e/examples_runn_test.go`、`e2e` タグ）が echo オリジン + localfront を起動し、`LF_ENDPOINT` を渡して `runn run scenario.yaml` を実行（CWD をシナリオのディレクトリにして runn の `read:parent` scope を回避）。runn が PATH に無ければ `t.Skip`。オリジンのポートだけ環境依存なのでテンプレートの `HTTPPort: 3000` を実ポートに置換する（テンプレートの構造・Function・ポリシーはそのまま検証対象）。
+- **対象**: 現状 functions（URL 正規化 / リダイレクト / KVS フラグ）と cors-security（プリフライト / CORS / セキュリティヘッダ）。S3 を要する例（spa-hosting / static-and-api）は dockertest 駆動の Go e2e でカバー。
+
 ## CFN パーサ: goformation 不採用、yaml.v3 + 自前実装（2026-06 確定）
 
 - [awslabs/goformation](https://github.com/awslabs/goformation) は **2024-10-17 にアーカイブ済み**（最終リリース v7.14.9, 2024-04）。
