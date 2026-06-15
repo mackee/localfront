@@ -134,8 +134,9 @@ viewer request
 
 ## 統合テスト戦略
 
-- **形態**: `go test -tags e2e ./e2e/...`。localfront は**ビルド済みバイナリをサブプロセス起動**(ブラックボックス、カバレッジは unit 側で担保)。RustFS は testcontainers-go で起動(イメージ取得不可時のフォールバックとして MinIO 互換モードを用意)。フィクスチャ投入は aws-sdk-go-v2。
+- **形態**: `go test -tags e2e ./e2e/...`。localfront は**ビルド済みバイナリをサブプロセス起動**(ブラックボックス、カバレッジは unit 側で担保)。RustFS は **ory/dockertest** で起動(`LOCALFRONT_E2E_S3_IMAGE` でイメージ差し替え可、MinIO 互換イメージへのフォールバック手段)。フィクスチャ投入は aws-sdk-go-v2 の SigV4 署名器を流用。`e2e` ビルドタグ配下なので dockertest 依存は `go install .../cmd/localfront` のビルドグラフに入らない。
 - **CI**: unit は全 push、e2e は docker 利用可能な GitHub Actions ジョブで PR ごとに実行。
+- **メモ**: 当初計画は testcontainers-go だったが、より軽量な ory/dockertest を採用した(詳細は [design-decisions.md](./design-decisions.md))。
 - **コンフォーマンス(ストレッチ、post-PoC)**: 同じシナリオ群を環境変数ゲートで**実 CloudFront に対しても実行可能**にし、エミュレータの忠実度を継続検証する。fidelity notes の解消にも使う。
 
 ## 統合テストシナリオ(現実世界のユースケース)

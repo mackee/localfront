@@ -2,6 +2,18 @@
 
 実装中に確定した技術選定・設計判断。経緯ごと残す。
 
+## e2e のコンテナ駆動: ory/dockertest 採用（2026-06 確定）
+
+統合テスト（`e2e/`）で RustFS コンテナを起動する方法。当初計画は testcontainers-go だったが **ory/dockertest** を採用した。
+
+経緯:
+- 最初の実装では「依存フットプリントを増やしたくない」という理由で `docker` CLI 直叩き（`os/exec`）を選んだが、readiness 判定・cleanup・ポート解決をすべて手書きする羽目になり、ストア初期化中の 503 レースで一度不安定になった。
+- フットプリントの懸念は過大評価だった: e2e は `//go:build e2e` かつ `cmd/localfront` の import グラフ外なので、コンテナ系ライブラリの依存は **`go install .../cmd/localfront@latest` では取得もビルドもされない**。残コストは「ルート `go.mod` の require に載る」「`go test ./...` で取得される」だけ。
+- そこで ory/dockertest に切り替えた。testcontainers-go より軽量で、`pool.Retry()`(readiness リトライ)・`pool.Purge()` / `resource.Expire()`(cleanup)・`GetHostPort()`(ポート解決)が手書きロジックを置き換える。Docker daemon API を直接叩くので `docker` CLI が PATH に無くても動く。
+- 依存の置き場所は**同一モジュール**（ルート `go.mod`）。ネストモジュールにすると `go test ./...` が e2e を再帰しなくなり CI/ローカル実行が二重管理になるため避けた。
+- イメージは `LOCALFRONT_E2E_S3_IMAGE` で差し替え可能（MinIO 互換へのフォールバック）。Docker 不在時は `dockertest.NewPool` / `Ping` 失敗で `t.Skip`。
+- フィクスチャ投入（バケット作成・オブジェクト PUT）は S3 クライアントと同じ aws-sdk-go-v2 SigV4 署名器を流用。空ボディは `Content-Length: 0` 明示、書き込みは 503 リトライ付き。
+
 ## CFN パーサ: goformation 不採用、yaml.v3 + 自前実装（2026-06 確定）
 
 - [awslabs/goformation](https://github.com/awslabs/goformation) は **2024-10-17 にアーカイブ済み**（最終リリース v7.14.9, 2024-04）。
