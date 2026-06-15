@@ -132,6 +132,83 @@ func TestM4_CustomErrorResponse_SPAFallback(t *testing.T) {
 	}
 }
 
+// The custom error page is fetched under the behavior that serves
+// ResponsePagePath, so the failed request's behavior must not leak its
+// forwarded query string and headers onto the error-page origin request.
+func TestM4_CustomErrorResponse_CrossBehaviorForwarding(t *testing.T) {
+	apiSrv, apiHost, apiPort := newTestOriginServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, "api 404")
+	})
+	_ = apiSrv
+
+	var pagePath, pageQuery, pageSecret string
+	staticSrv, staticHost, staticPort := newTestOriginServer(t, func(w http.ResponseWriter, r *http.Request) {
+		pagePath = r.URL.Path
+		pageQuery = r.URL.RawQuery
+		pageSecret = r.Header.Get("X-Api-Secret")
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "<html>spa</html>")
+	})
+	_ = staticSrv
+
+	apiOrigin := customOrigin("api", apiHost, apiPort)
+	staticOrigin := customOrigin("static", staticHost, staticPort)
+
+	// The /api/* behavior forwards the debug query and X-Api-Secret header; the
+	// default behavior (which serves /index.html) forwards neither.
+	apiBeh := &config.Behavior{
+		PathPattern:    "/api/*",
+		Origin:         apiOrigin,
+		AllowedMethods: []string{"GET", "HEAD"},
+		CachePolicy: &config.CachePolicy{
+			Headers:      config.ListSelection{Behavior: "whitelist", Items: []string{"X-Api-Secret"}},
+			QueryStrings: config.ListSelection{Behavior: "whitelist", Items: []string{"debug"}},
+		},
+	}
+
+	dist := &config.Distribution{
+		LogicalID:       "D1",
+		ID:              "D1",
+		DomainName:      "d1.cloudfront.localhost",
+		Aliases:         []string{"site.example.test"},
+		Enabled:         true,
+		Origins:         []*config.Origin{staticOrigin, apiOrigin},
+		DefaultBehavior: getHeadBehavior(staticOrigin, ""),
+		Behaviors:       []*config.Behavior{apiBeh},
+		ErrorResponses: []*config.ErrorResponse{
+			{ErrorCode: 404, ResponseCode: 200, ResponsePagePath: "/index.html"},
+		},
+	}
+	cfg := &config.Config{Distributions: []*config.Distribution{dist}}
+	srv := dataplane.New(cfg, newLogger())
+
+	req := httptest.NewRequest(http.MethodGet, "http://site.example.test/api/missing?debug=1", nil)
+	req.Host = "site.example.test"
+	req.Header.Set("X-Api-Secret", "leak")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (SPA fallback)", rr.Code)
+	}
+	if body := rr.Body.String(); body != "<html>spa</html>" {
+		t.Errorf("body = %q, want the index.html body", body)
+	}
+	if pagePath != "/index.html" {
+		t.Errorf("error page fetched %q, want /index.html", pagePath)
+	}
+	// The default behavior forwards nothing, so the /api/* behavior's debug
+	// query and X-Api-Secret header must not reach the error-page origin.
+	if pageQuery != "" {
+		t.Errorf("error-page origin received query %q, want none", pageQuery)
+	}
+	if pageSecret != "" {
+		t.Errorf("error-page origin received X-Api-Secret %q, want it not forwarded", pageSecret)
+	}
+}
+
 func TestM4_CustomErrorResponse_StatusRewriteNoPage(t *testing.T) {
 	originSrv, host, port := newTestOriginServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

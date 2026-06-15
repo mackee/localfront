@@ -60,6 +60,13 @@ func TestBuildOriginRequest_Headers(t *testing.T) {
 			wantAbsent:  []string{"X-Custom"},
 		},
 		{
+			// Legacy ForwardedValues.Headers: ['*'] maps to Behavior "all".
+			name:        "legacy all forwards every viewer header",
+			cache:       &config.CachePolicy{Headers: sel("all")},
+			reqHeaders:  map[string]string{"X-Custom": "v", "Authorization": "bearer"},
+			wantForward: []string{"X-Custom", "Authorization"},
+		},
+		{
 			name:        "ORP allViewer forwards all viewer headers",
 			cache:       &config.CachePolicy{Headers: sel("none")},
 			orp:         &config.OriginRequestPolicy{Headers: sel("allViewer")},

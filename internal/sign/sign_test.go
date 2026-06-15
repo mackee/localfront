@@ -67,6 +67,22 @@ func TestVerify_CannedURL_Accept(t *testing.T) {
 	}
 }
 
+func TestVerify_CannedURL_WithQueryString(t *testing.T) {
+	priv, trusted := testKey(t)
+	signer := awssign.NewURLSigner(keyPairID, priv)
+	expires := time.Now().Add(time.Hour)
+	// The base URL carries application query parameters; the canned resource the
+	// signer signs includes them (and the '&' between them), so the verifier must
+	// reconstruct the query and encode '&' literally (not as the U+0026 escape).
+	signed, err := signer.Sign("https://media.example.test/premium/video.mp4?foo=bar&baz=qux", expires)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	if err := sign.Verify(requestFromSignedURL(signed), trusted, time.Now()); err != nil {
+		t.Errorf("canned signed URL with query string should verify, got: %v", err)
+	}
+}
+
 func TestVerify_CannedURL_Expired(t *testing.T) {
 	priv, trusted := testKey(t)
 	signer := awssign.NewURLSigner(keyPairID, priv)

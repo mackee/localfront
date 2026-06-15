@@ -1,6 +1,7 @@
 package cffunc
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -52,6 +53,69 @@ func TestNewRequestEvent_Structure(t *testing.T) {
 	a := ev.Request.Querystring["a"]
 	if a.Value != "1" || len(a.MultiValue) != 2 || a.MultiValue[1].Value != "3" {
 		t.Errorf("querystring a = %+v, want value=1 multiValue=[1 3]", a)
+	}
+}
+
+func TestNewRequestEvent_HostFromRequestHost(t *testing.T) {
+	// A server-received request keeps Host in r.Host, not in r.Header; the event
+	// must still expose it as the lowercase "host" header.
+	r := httptest.NewRequest(http.MethodGet, "http://viewer.example.test/path", nil)
+	if _, ok := r.Header["Host"]; ok {
+		t.Fatal("precondition: httptest request should not carry Host in Header")
+	}
+	r.RemoteAddr = "203.0.113.5:4444"
+
+	ev := NewRequestEvent("viewer-request", Context{EventType: "viewer-request"}, r, nil)
+
+	host, ok := ev.Request.Headers["host"]
+	if !ok {
+		t.Fatalf("event missing 'host' header; headers = %v", ev.Request.Headers)
+	}
+	if host.Value != "viewer.example.test" {
+		t.Errorf("host = %q, want viewer.example.test", host.Value)
+	}
+}
+
+func TestResponseHTTPHeaders_Cookies(t *testing.T) {
+	resp := &Response{
+		Headers: map[string]Field{
+			"content-type": {Value: "text/html"},
+		},
+		Cookies: map[string]ResponseCookie{
+			"session": {Value: "abc", Attributes: "Path=/; Secure; HttpOnly"},
+			"theme":   {Value: "dark"},
+		},
+	}
+	h := resp.HTTPHeaders()
+
+	if got := h.Get("Content-Type"); got != "text/html" {
+		t.Errorf("Content-Type = %q, want text/html", got)
+	}
+	cookies := h.Values("Set-Cookie")
+	// Sorted by cookie name: session, theme.
+	want := []string{"session=abc; Path=/; Secure; HttpOnly", "theme=dark"}
+	if len(cookies) != len(want) {
+		t.Fatalf("Set-Cookie = %v, want %v", cookies, want)
+	}
+	for i := range want {
+		if cookies[i] != want[i] {
+			t.Errorf("Set-Cookie[%d] = %q, want %q", i, cookies[i], want[i])
+		}
+	}
+}
+
+func TestResponseCookies_Unmarshal(t *testing.T) {
+	const raw = `{"statusCode":200,"cookies":{"id":{"value":"v1","attributes":"Path=/"}}}`
+	var resp Response
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	c, ok := resp.Cookies["id"]
+	if !ok {
+		t.Fatalf("cookie 'id' missing; cookies = %v", resp.Cookies)
+	}
+	if c.Value != "v1" || c.Attributes != "Path=/" {
+		t.Errorf("cookie = %+v, want value=v1 attributes=Path=/", c)
 	}
 }
 

@@ -66,11 +66,19 @@ type Request struct {
 // Response is the response half of the event (and the short-circuit response a
 // viewer-request function may return).
 type Response struct {
-	StatusCode        int              `json:"statusCode"`
-	StatusDescription string           `json:"statusDescription,omitempty"`
-	Headers           map[string]Field `json:"headers"`
-	Cookies           map[string]Field `json:"cookies,omitempty"`
-	Body              *Body            `json:"body,omitempty"`
+	StatusCode        int                       `json:"statusCode"`
+	StatusDescription string                    `json:"statusDescription,omitempty"`
+	Headers           map[string]Field          `json:"headers"`
+	Cookies           map[string]ResponseCookie `json:"cookies,omitempty"`
+	Body              *Body                     `json:"body,omitempty"`
+}
+
+// ResponseCookie is a cookie a function sets on the response: a value plus the
+// optional attributes string (e.g. "Path=/; Secure; Expires=...") as CloudFront
+// Functions model it.
+type ResponseCookie struct {
+	Value      string `json:"value"`
+	Attributes string `json:"attributes,omitempty"`
 }
 
 // values returns all values of a Field, preferring multiValue when present.
@@ -100,11 +108,17 @@ func fieldFromValues(values []string) Field {
 // from an HTTP request. viewerHeaders are the synthesized CloudFront-* headers,
 // merged in so functions observe them (e.g. CloudFront-Viewer-Country).
 func NewRequestEvent(eventType string, ctx Context, r *http.Request, viewerHeaders http.Header) *Event {
+	headers := headersToFields(r.Header, viewerHeaders)
+	// Go stores the viewer Host in r.Host (stripped from r.Header); CloudFront
+	// exposes it as the lowercase "host" header in the function event.
+	if r.Host != "" {
+		headers["host"] = fieldFromValues([]string{r.Host})
+	}
 	req := &Request{
 		Method:      r.Method,
 		URI:         r.URL.Path,
 		Querystring: queryToFields(r.URL.RawQuery),
-		Headers:     headersToFields(r.Header, viewerHeaders),
+		Headers:     headers,
 		Cookies:     cookiesToMap(r.Header.Get("Cookie")),
 	}
 	return &Event{Version: "1.0", Context: ctx, Viewer: Viewer{IP: clientIP(r.RemoteAddr)}, Request: req}
@@ -202,11 +216,28 @@ func headersToFields(header, viewerHeaders http.Header) map[string]Field {
 	return out
 }
 
-// HTTPHeaders converts the response's header fields back to an http.Header.
+// HTTPHeaders converts the response's header fields back to an http.Header,
+// including a Set-Cookie header for each cookie the function set on the
+// response. Cookie names are sorted for deterministic output.
 func (r *Response) HTTPHeaders() http.Header {
 	out := make(http.Header, len(r.Headers))
 	for name, f := range r.Headers {
 		out[http.CanonicalHeaderKey(name)] = f.values()
+	}
+	if len(r.Cookies) > 0 {
+		names := make([]string, 0, len(r.Cookies))
+		for name := range r.Cookies {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			c := r.Cookies[name]
+			v := name + "=" + c.Value
+			if c.Attributes != "" {
+				v += "; " + c.Attributes
+			}
+			out.Add("Set-Cookie", v)
+		}
 	}
 	return out
 }

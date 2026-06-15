@@ -99,6 +99,10 @@ func forwardsHeader(cache *config.CachePolicy, orp *config.OriginRequestPolicy, 
 // from cache policies (which support only none / whitelist for headers).
 func headerSelected(sel config.ListSelection, name string, allowViewer bool) bool {
 	switch sel.Behavior {
+	case "all":
+		// Legacy ForwardedValues with Headers: ['*'] forwards every viewer
+		// header (mapped to "all" by cachePolicyFromForwardedValues).
+		return true
 	case "whitelist":
 		return sel.Contains(name)
 	case "allViewer", "allViewerAndWhitelistCloudFront":

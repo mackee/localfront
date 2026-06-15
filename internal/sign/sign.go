@@ -132,16 +132,21 @@ func findKey(trusted []Key, id string) *rsa.PublicKey {
 }
 
 // verifyCanned validates a canned policy. The signed policy embeds the resource
-// URL, which localfront reconstructs from the request; the viewer side is plain
-// HTTP locally, so both https and http resources are tried.
+// URL (the base URL with its application query string, but without CloudFront's
+// signing parameters), which localfront reconstructs from the request; the
+// viewer side is plain HTTP locally, so both https and http resources are tried.
 func verifyCanned(r *http.Request, key *rsa.PublicKey, expires string, sig []byte, now time.Time) error {
 	exp, err := strconv.ParseInt(expires, 10, 64)
 	if err != nil {
 		return deny("malformed Expires")
 	}
+	query := resourceQuery(r.URL.RawQuery)
 	matched := false
 	for _, scheme := range []string{"https", "http"} {
 		resource := scheme + "://" + r.Host + r.URL.Path
+		if query != "" {
+			resource += "?" + query
+		}
 		if verifyRSA(key, cannedPolicyJSON(resource, exp), sig) {
 			matched = true
 			break
@@ -192,17 +197,64 @@ func verifyRSA(key *rsa.PublicKey, message, sig []byte) bool {
 	return rsa.VerifyPKCS1v15(key, crypto.SHA1, sum[:], sig) == nil
 }
 
+// cloudFrontSigningParams are the query parameters CloudFront appends to a
+// signed URL. They are not part of the resource the canned policy signs, so the
+// verifier strips them before reconstructing the resource.
+var cloudFrontSigningParams = map[string]bool{
+	"Expires":        true,
+	"Signature":      true,
+	"Key-Pair-Id":    true,
+	"Policy":         true,
+	"Hash-Algorithm": true,
+}
+
+// resourceQuery returns the application query string of a signed URL: the raw
+// query with CloudFront's signing parameters removed, preserving the order and
+// raw encoding of the remaining parameters (the signer signs the base URL, with
+// its query string, verbatim).
+func resourceQuery(rawQuery string) string {
+	if rawQuery == "" {
+		return ""
+	}
+	var kept []string
+	for _, param := range strings.Split(rawQuery, "&") {
+		if param == "" {
+			continue
+		}
+		key := param
+		if eq := strings.IndexByte(param, '='); eq >= 0 {
+			key = param[:eq]
+		}
+		if cloudFrontSigningParams[key] {
+			continue
+		}
+		kept = append(kept, param)
+	}
+	return strings.Join(kept, "&")
+}
+
 // cannedPolicyJSON reproduces, byte for byte, the canned policy the
 // aws-sdk-go-v2 signer encodes (compact JSON, fixed field order).
 func cannedPolicyJSON(resource string, expires int64) []byte {
-	res, _ := json.Marshal(resource) // JSON-escape the resource string
 	var b bytes.Buffer
 	b.WriteString(`{"Statement":[{"Resource":`)
-	b.Write(res)
+	b.Write(jsonString(resource))
 	b.WriteString(`,"Condition":{"DateLessThan":{"AWS:EpochTime":`)
 	b.WriteString(strconv.FormatInt(expires, 10))
 	b.WriteString(`}}}]}`)
 	return b.Bytes()
+}
+
+// jsonString encodes s as a JSON string the way the aws-sdk-go-v2 CloudFront
+// signer does: with HTML escaping disabled, so characters like '&' in a
+// resource query string are emitted literally. json.Marshal would escape '&',
+// '<' and '>' to their \uXXXX form and break signature verification.
+func jsonString(s string) []byte {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(s)
+	return bytes.TrimRight(buf.Bytes(), "\n")
 }
 
 type statement struct {

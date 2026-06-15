@@ -75,7 +75,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, dist *config.Dist
 			writeCFError(w, http.StatusBadGateway, requestID, "localfront wasn't able to connect to the origin.")
 			return
 		}
-		if applied := s.applyErrorResponse(r.Context(), r, dist, resp, originReq, requestID); applied != nil {
+		if applied := s.applyErrorResponse(r.Context(), r, dist, resp, viewerHeaders, requestID); applied != nil {
 			resp.close()
 			resp = applied
 		}
@@ -112,7 +112,7 @@ func (s *Server) fetchOrigin(ctx context.Context, r *http.Request, dist *config.
 // ResponsePagePath) or fetches the response page from the behavior that serves
 // that path and returns it with the configured ResponseCode. It returns nil
 // when no error response applies (resp is left untouched).
-func (s *Server) applyErrorResponse(ctx context.Context, r *http.Request, dist *config.Distribution, resp *originResponse, originReq behavior.OriginRequest, requestID string) *originResponse {
+func (s *Server) applyErrorResponse(ctx context.Context, r *http.Request, dist *config.Distribution, resp *originResponse, viewerHeaders http.Header, requestID string) *originResponse {
 	er := matchErrorResponse(dist, resp.statusCode)
 	if er == nil {
 		return nil
@@ -138,7 +138,12 @@ func (s *Server) applyErrorResponse(ctx context.Context, r *http.Request, dist *
 	pageURL.RawPath = ""
 	pageReq.URL = &pageURL
 
-	page := s.fetchOrigin(ctx, pageReq, dist, pageBeh, originReq, requestID)
+	// The error page is fetched as the viewer request re-evaluated under the
+	// behavior that serves ResponsePagePath: its cache / origin request policies
+	// (not the failed behavior's) decide what reaches the origin. Reusing the
+	// failed behavior's origin request would leak its forwarded headers/query.
+	pageOriginReq := behavior.BuildOriginRequest(pageBeh, pageReq, viewerHeaders)
+	page := s.fetchOrigin(ctx, pageReq, dist, pageBeh, pageOriginReq, requestID)
 	if page == nil {
 		s.logger.Warn("custom error page fetch failed; serving origin error",
 			"errorCode", er.ErrorCode, "page", er.ResponsePagePath)
