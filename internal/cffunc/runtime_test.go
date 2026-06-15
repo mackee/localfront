@@ -1,8 +1,10 @@
 package cffunc
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 )
 
@@ -174,6 +176,51 @@ function handler(event) {
 	_, err := f.Execute(requestEvent(http.MethodGet, "http://example.test/"))
 	if err == nil {
 		t.Fatal("expected an error from a throwing handler")
+	}
+}
+
+// Concurrent invocations exercise the runtime pool (borrow / return / stack-top
+// re-anchoring across goroutines). Run under -race to catch pool races.
+func TestExecute_Concurrent(t *testing.T) {
+	const code = `
+import cf from 'cloudfront';
+const kvs = cf.kvs();
+async function handler(event) {
+	const v = await kvs.get('k');
+	event.request.headers['x-kvs'] = { value: v };
+	event.request.uri = '/p' + event.request.uri;
+	return event.request;
+}`
+	store := NewKVS()
+	store.Replace(map[string]string{"k": "v"})
+	f := mustCompile(t, Options{Name: "concurrent", Code: code, KVS: store, PoolSize: 4})
+
+	const workers = 24
+	const each = 20
+	var wg sync.WaitGroup
+	errs := make(chan error, workers)
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			for i := 0; i < each; i++ {
+				ev := requestEvent(http.MethodGet, fmt.Sprintf("http://example.test/w%d-%d", w, i))
+				res, err := f.Execute(ev)
+				if err != nil {
+					errs <- err
+					return
+				}
+				if res.Request == nil || res.Request.Headers["x-kvs"].Value != "v" {
+					errs <- fmt.Errorf("worker %d iter %d: unexpected result %+v", w, i, res)
+					return
+				}
+			}
+		}(w)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent execute: %v", err)
 	}
 }
 
