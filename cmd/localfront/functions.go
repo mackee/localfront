@@ -19,9 +19,9 @@ import (
 // their stores do not require the object store — mirroring how routing ignores
 // them. Functions/stores not associated with any enabled behavior are also
 // excluded, since CloudFront never executes them.
-func reachableResources(cfg *config.Config) (funcs, kvs map[string]bool) {
-	funcs = map[string]bool{}
-	kvs = map[string]bool{}
+func reachableResources(cfg *config.Config) (funcIDs, kvsIDs map[string]bool) {
+	funcIDs = map[string]bool{}
+	kvsIDs = map[string]bool{}
 	for _, d := range cfg.Distributions {
 		if !d.Enabled {
 			continue
@@ -37,14 +37,14 @@ func reachableResources(cfg *config.Config) (funcs, kvs map[string]bool) {
 				if fn == nil {
 					continue
 				}
-				funcs[fn.LogicalID] = true
+				funcIDs[fn.LogicalID] = true
 				for _, store := range fn.KeyValueStores {
-					kvs[store.LogicalID] = true
+					kvsIDs[store.LogicalID] = true
 				}
 			}
 		}
 	}
-	return funcs, kvs
+	return funcIDs, kvsIDs
 }
 
 // buildFunctions compiles the CloudFront Functions reachable from enabled
