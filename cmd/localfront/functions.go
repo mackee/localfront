@@ -50,9 +50,11 @@ func reachableResources(cfg *config.Config) (funcs, kvs map[string]bool) {
 // buildFunctions compiles the CloudFront Functions reachable from enabled
 // distributions, wiring each to its associated (seeded) KeyValueStore. On any
 // compile error it closes the functions it already built and returns the error.
-func buildFunctions(cfg *config.Config, s3 origin.Fetcher, seeds map[string]string, logger *slog.Logger) (map[string]*cffunc.Function, error) {
+// ctx bounds any ImportSource fetches against the object store, so a reload or
+// shutdown can cancel a slow remote read.
+func buildFunctions(ctx context.Context, cfg *config.Config, s3 origin.Fetcher, seeds map[string]string, logger *slog.Logger) (map[string]*cffunc.Function, error) {
 	reachableFuncs, reachableKVS := reachableResources(cfg)
-	stores, err := buildKVSStores(cfg, reachableKVS, s3, seeds, logger)
+	stores, err := buildKVSStores(ctx, cfg, reachableKVS, s3, seeds, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +106,7 @@ func closeFunctions(funcs map[string]*cffunc.Function) {
 // from the object store). A store reachable only from disabled distributions is
 // created empty: its ImportSource is not fetched, so it does not force the
 // object-store requirement.
-func buildKVSStores(cfg *config.Config, reachableKVS map[string]bool, s3 origin.Fetcher, seeds map[string]string, logger *slog.Logger) (map[string]*cffunc.KVS, error) {
+func buildKVSStores(ctx context.Context, cfg *config.Config, reachableKVS map[string]bool, s3 origin.Fetcher, seeds map[string]string, logger *slog.Logger) (map[string]*cffunc.KVS, error) {
 	stores := map[string]*cffunc.KVS{}
 	usedSeeds := map[string]bool{}
 
@@ -124,7 +126,7 @@ func buildKVSStores(cfg *config.Config, reachableKVS map[string]bool, s3 origin.
 			if s3 == nil {
 				return nil, fmt.Errorf("KeyValueStore %s has an ImportSource but no object store is configured (set --s3-endpoint, or provide a local --kvs-seed)", kvs.Name)
 			}
-			imported, err := loadKVSImportSource(s3, kvs.ImportSourceARN)
+			imported, err := loadKVSImportSource(ctx, s3, kvs.ImportSourceARN)
 			if err != nil {
 				return nil, fmt.Errorf("KeyValueStore %s ImportSource: %w", kvs.Name, err)
 			}
@@ -160,14 +162,14 @@ func lookupSeed(seeds map[string]string, name, logicalID string) (key, path stri
 	return "", "", false
 }
 
-func loadKVSImportSource(s3 origin.Fetcher, arn string) (map[string]string, error) {
+func loadKVSImportSource(ctx context.Context, s3 origin.Fetcher, arn string) (map[string]string, error) {
 	bucket, key, err := parseS3ObjectARN(arn)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := s3.Fetch(context.Background(), &origin.Request{Bucket: bucket, Key: key, Method: "GET"})
+	resp, err := s3.Fetch(ctx, &origin.Request{Bucket: bucket, Key: key, Method: "GET"})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("fetching s3://%s/%s: %w", bucket, key, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
@@ -175,7 +177,7 @@ func loadKVSImportSource(s3 origin.Fetcher, arn string) (map[string]string, erro
 	}
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading s3://%s/%s: %w", bucket, key, err)
 	}
 	return cffunc.ParseSeed(raw)
 }

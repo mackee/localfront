@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ const funcCloseGrace = 30 * time.Second
 // swaps them into the running server atomically. A failed reload leaves the
 // current configuration untouched.
 type reloader struct {
+	ctx    context.Context
 	opts   *serveOptions
 	s3     origin.Fetcher
 	server *dataplane.Server
@@ -35,7 +37,7 @@ func (rl *reloader) reload() error {
 	if err != nil {
 		return err
 	}
-	funcs, err := buildFunctions(cfg, rl.s3, rl.opts.kvsSeeds, rl.logger)
+	funcs, err := buildFunctions(rl.ctx, cfg, rl.s3, rl.opts.kvsSeeds, rl.logger)
 	if err != nil {
 		return err
 	}

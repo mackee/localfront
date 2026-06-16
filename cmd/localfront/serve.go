@@ -39,7 +39,7 @@ func serve(ctx context.Context, opts *serveOptions, logger *slog.Logger) error {
 		return fmt.Errorf("the templates use S3 origins or a KeyValueStore ImportSource; provide --s3-endpoint (and --s3-access-key / --s3-secret-key) for the object store")
 	}
 
-	funcs, err := buildFunctions(cfg, s3Client, opts.kvsSeeds, logger)
+	funcs, err := buildFunctions(ctx, cfg, s3Client, opts.kvsSeeds, logger)
 	if err != nil {
 		return err
 	}
@@ -50,7 +50,7 @@ func serve(ctx context.Context, opts *serveOptions, logger *slog.Logger) error {
 	server := dataplane.New(cfg, logger, dpOpts...)
 	server.Swap(cfg, funcs)
 
-	rl := &reloader{opts: opts, s3: s3Client, server: server, logger: logger, currentFuncs: funcs}
+	rl := &reloader{ctx: ctx, opts: opts, s3: s3Client, server: server, logger: logger, currentFuncs: funcs}
 	defer rl.closeCurrent()
 
 	httpServer := &http.Server{

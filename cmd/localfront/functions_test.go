@@ -98,7 +98,7 @@ func TestBuildKVSStores_SeedReplacesImportSource(t *testing.T) {
 
 	_, reachableKVS := reachableResources(cfg)
 	// s3 is nil: the ImportSource must be skipped because a seed covers the store.
-	stores, err := buildKVSStores(cfg, reachableKVS, nil, map[string]string{"store": seedPath}, testLogger())
+	stores, err := buildKVSStores(t.Context(), cfg, reachableKVS, nil, map[string]string{"store": seedPath}, testLogger())
 	if err != nil {
 		t.Fatalf("buildKVSStores with a seed should not require S3, got: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestBuildFunctions_SkipsUnreachable(t *testing.T) {
 		},
 		Functions: []*config.Function{reachable, unreachable},
 	}
-	funcs, err := buildFunctions(cfg, nil, nil, testLogger())
+	funcs, err := buildFunctions(t.Context(), cfg, nil, nil, testLogger())
 	if err != nil {
 		t.Fatalf("buildFunctions should ignore a broken function on a disabled distribution, got: %v", err)
 	}
