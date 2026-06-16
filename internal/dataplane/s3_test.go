@@ -253,7 +253,7 @@ func TestS3Proxy_ForwardedHeaders(t *testing.T) {
 
 func TestS3Proxy_ForwardsQueryAcceptEncodingAndCustomHeaders(t *testing.T) {
 	o := s3TestOrigin("s3", "assets", "")
-	o.CustomHeaders = []config.Header{{Name: "X-Origin-Token", Value: "secret"}}
+	o.CustomHeaders = []config.OriginCustomHeader{{Name: "X-Origin-Token", Value: "secret"}}
 	dist := s3TestDistribution("assets.cloudfront.localhost", "", o)
 	// Forward all query strings and normalize Accept-Encoding to gzip.
 	dist.DefaultBehavior.CachePolicy = &config.CachePolicy{

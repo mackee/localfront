@@ -48,15 +48,17 @@ func (d *Distribution) Hostnames() []string {
 type Origin struct {
 	ID                 string
 	OriginPath         string
-	CustomHeaders      []Header
+	CustomHeaders      []OriginCustomHeader
 	Custom             *CustomOrigin
 	S3                 *S3Origin
 	ConnectionAttempts int
 	ConnectionTimeout  time.Duration
 }
 
-// Header is a static header attached to origin requests.
-type Header struct {
+// OriginCustomHeader is a static header attached to origin requests
+// (the OriginCustomHeaders block on an origin). Renamed away from "Header"
+// to avoid confusion with net/http.Header at call sites.
+type OriginCustomHeader struct {
 	Name  string
 	Value string
 }

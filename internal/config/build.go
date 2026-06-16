@@ -433,7 +433,7 @@ func buildOrigin(op *originProps) (*Origin, error) {
 		ConnectionTimeout:  time.Duration(op.ConnectionTimeout.Value(10)) * time.Second,
 	}
 	for _, h := range op.OriginCustomHeaders {
-		o.CustomHeaders = append(o.CustomHeaders, Header{Name: h.HeaderName, Value: h.HeaderValue})
+		o.CustomHeaders = append(o.CustomHeaders, OriginCustomHeader{Name: h.HeaderName, Value: h.HeaderValue})
 	}
 	switch {
 	case op.S3OriginConfig != nil && op.CustomOriginConfig != nil:

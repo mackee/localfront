@@ -359,7 +359,7 @@ func TestProxy_OriginCustomHeaders(t *testing.T) {
 			ReadTimeout:      5 * time.Second,
 			KeepaliveTimeout: 5 * time.Second,
 		},
-		CustomHeaders: []config.Header{
+		CustomHeaders: []config.OriginCustomHeader{
 			{Name: "X-Custom-Auth", Value: "secret-token"},
 			// X-Viewer-Header is also set as a custom header, should override viewer value
 			{Name: "X-Viewer-Header", Value: "from-origin-config"},
