@@ -18,72 +18,72 @@ func decodeProps(props map[string]any, dst any) error {
 	return json.Unmarshal(b, dst)
 }
 
-// FlexBool accepts both JSON booleans and their string forms ("true"),
+// flexBool accepts both JSON booleans and their string forms ("true"),
 // which CloudFormation treats interchangeably.
-type FlexBool bool
+type flexBool bool
 
-func (b *FlexBool) UnmarshalJSON(data []byte) error {
+func (b *flexBool) UnmarshalJSON(data []byte) error {
 	v, err := strconv.ParseBool(strings.Trim(string(data), `"`))
 	if err != nil {
 		return fmt.Errorf("cannot parse %s as a boolean", string(data))
 	}
-	*b = FlexBool(v)
+	*b = flexBool(v)
 	return nil
 }
 
 // Value returns the boolean, treating an absent (nil) value as def.
-func (b *FlexBool) Value(def bool) bool {
+func (b *flexBool) Value(def bool) bool {
 	if b == nil {
 		return def
 	}
 	return bool(*b)
 }
 
-// FlexInt accepts JSON numbers and numeric strings.
-type FlexInt int64
+// flexInt accepts JSON numbers and numeric strings.
+type flexInt int64
 
-func (n *FlexInt) UnmarshalJSON(data []byte) error {
+func (n *flexInt) UnmarshalJSON(data []byte) error {
 	f, err := strconv.ParseFloat(strings.Trim(string(data), `"`), 64)
 	if err != nil {
 		return fmt.Errorf("cannot parse %s as a number", string(data))
 	}
-	*n = FlexInt(int64(f))
+	*n = flexInt(int64(f))
 	return nil
 }
 
 // Value returns the number, treating an absent (nil) value as def.
-func (n *FlexInt) Value(def int64) int64 {
+func (n *flexInt) Value(def int64) int64 {
 	if n == nil {
 		return def
 	}
 	return int64(*n)
 }
 
-// FlexFloat accepts JSON numbers and numeric strings.
-type FlexFloat float64
+// flexFloat accepts JSON numbers and numeric strings.
+type flexFloat float64
 
-func (n *FlexFloat) UnmarshalJSON(data []byte) error {
+func (n *flexFloat) UnmarshalJSON(data []byte) error {
 	f, err := strconv.ParseFloat(strings.Trim(string(data), `"`), 64)
 	if err != nil {
 		return fmt.Errorf("cannot parse %s as a number", string(data))
 	}
-	*n = FlexFloat(f)
+	*n = flexFloat(f)
 	return nil
 }
 
 // Value returns the number, treating an absent (nil) value as def.
-func (n *FlexFloat) Value(def float64) float64 {
+func (n *flexFloat) Value(def float64) float64 {
 	if n == nil {
 		return def
 	}
 	return float64(*n)
 }
 
-// StringList accepts a plain JSON array of strings, the API-shaped
+// stringList accepts a plain JSON array of strings, the API-shaped
 // {"Items": [...]} object, and a bare string.
-type StringList []string
+type stringList []string
 
-func (l *StringList) UnmarshalJSON(data []byte) error {
+func (l *stringList) UnmarshalJSON(data []byte) error {
 	var arr []string
 	if err := json.Unmarshal(data, &arr); err == nil {
 		*l = arr
@@ -109,15 +109,15 @@ type distributionProps struct {
 }
 
 type distributionConfigProps struct {
-	Aliases                      StringList
-	CNAMEs                       StringList // legacy spelling of Aliases
+	Aliases                      stringList
+	CNAMEs                       stringList // legacy spelling of Aliases
 	Comment                      string
 	ContinuousDeploymentPolicyId string
 	CustomErrorResponses         []customErrorResponseProps
 	DefaultCacheBehavior         *behaviorProps
 	CacheBehaviors               []behaviorProps
 	DefaultRootObject            string
-	Enabled                      *FlexBool
+	Enabled                      *flexBool
 	OriginGroups                 *originGroupsProps
 	Origins                      []originProps
 	Restrictions                 json.RawMessage // stored, not enforced
@@ -128,7 +128,7 @@ type distributionConfigProps struct {
 }
 
 type originGroupsProps struct {
-	Quantity *FlexInt
+	Quantity *flexInt
 	Items    []json.RawMessage
 }
 
@@ -136,8 +136,8 @@ type originProps struct {
 	Id                    string
 	DomainName            string
 	OriginPath            string
-	ConnectionAttempts    *FlexInt
-	ConnectionTimeout     *FlexInt
+	ConnectionAttempts    *flexInt
+	ConnectionTimeout     *flexInt
 	CustomOriginConfig    *customOriginConfigProps
 	S3OriginConfig        *s3OriginConfigProps
 	OriginAccessControlId string // accepted, not enforced
@@ -146,17 +146,17 @@ type originProps struct {
 }
 
 type customOriginConfigProps struct {
-	HTTPPort               *FlexInt
-	HTTPSPort              *FlexInt
-	OriginKeepaliveTimeout *FlexInt
+	HTTPPort               *flexInt
+	HTTPSPort              *flexInt
+	OriginKeepaliveTimeout *flexInt
 	OriginProtocolPolicy   string
-	OriginReadTimeout      *FlexInt
-	OriginSSLProtocols     StringList // ignored
+	OriginReadTimeout      *flexInt
+	OriginSSLProtocols     stringList // ignored
 }
 
 type s3OriginConfigProps struct {
 	OriginAccessIdentity string // accepted, not enforced
-	OriginReadTimeout    *FlexInt
+	OriginReadTimeout    *flexInt
 }
 
 type originCustomHeaderProps struct {
@@ -168,34 +168,34 @@ type behaviorProps struct {
 	PathPattern                string
 	TargetOriginId             string
 	ViewerProtocolPolicy       string // accepted, never redirects locally
-	AllowedMethods             StringList
-	CachedMethods              StringList
+	AllowedMethods             stringList
+	CachedMethods              stringList
 	CachePolicyId              string
 	OriginRequestPolicyId      string
 	ResponseHeadersPolicyId    string
-	Compress                   *FlexBool
+	Compress                   *flexBool
 	FieldLevelEncryptionId     string
 	ForwardedValues            *forwardedValuesProps
 	FunctionAssociations       []functionAssociationProps
 	LambdaFunctionAssociations []json.RawMessage
 	RealtimeLogConfigArn       string
-	TrustedKeyGroups           StringList
-	TrustedSigners             StringList
-	MinTTL                     *FlexFloat // legacy, with ForwardedValues
-	DefaultTTL                 *FlexFloat
-	MaxTTL                     *FlexFloat
+	TrustedKeyGroups           stringList
+	TrustedSigners             stringList
+	MinTTL                     *flexFloat // legacy, with ForwardedValues
+	DefaultTTL                 *flexFloat
+	MaxTTL                     *flexFloat
 }
 
 type forwardedValuesProps struct {
-	QueryString          *FlexBool
+	QueryString          *flexBool
 	Cookies              *forwardedCookiesProps
-	Headers              StringList
-	QueryStringCacheKeys StringList
+	Headers              stringList
+	QueryStringCacheKeys stringList
 }
 
 type forwardedCookiesProps struct {
 	Forward          string // none / whitelist / all
-	WhitelistedNames StringList
+	WhitelistedNames stringList
 }
 
 type functionAssociationProps struct {
@@ -204,10 +204,10 @@ type functionAssociationProps struct {
 }
 
 type customErrorResponseProps struct {
-	ErrorCode          *FlexInt
-	ResponseCode       *FlexInt
+	ErrorCode          *flexInt
+	ResponseCode       *flexInt
 	ResponsePagePath   string
-	ErrorCachingMinTTL *FlexFloat // ignored: the PoC does not cache
+	ErrorCachingMinTTL *flexFloat // ignored: the PoC does not cache
 }
 
 // --- AWS::CloudFront::CachePolicy ---
@@ -219,15 +219,15 @@ type cachePolicyProps struct {
 type cachePolicyConfigProps struct {
 	Name                                     string
 	Comment                                  string
-	DefaultTTL                               *FlexFloat
-	MaxTTL                                   *FlexFloat
-	MinTTL                                   *FlexFloat
+	DefaultTTL                               *flexFloat
+	MaxTTL                                   *flexFloat
+	MinTTL                                   *flexFloat
 	ParametersInCacheKeyAndForwardedToOrigin *cacheKeyParamsProps
 }
 
 type cacheKeyParamsProps struct {
-	EnableAcceptEncodingBrotli *FlexBool
-	EnableAcceptEncodingGzip   *FlexBool
+	EnableAcceptEncodingBrotli *flexBool
+	EnableAcceptEncodingGzip   *flexBool
 	HeadersConfig              *headersConfigProps
 	CookiesConfig              *cookiesConfigProps
 	QueryStringsConfig         *queryStringsConfigProps
@@ -235,17 +235,17 @@ type cacheKeyParamsProps struct {
 
 type headersConfigProps struct {
 	HeaderBehavior string
-	Headers        StringList
+	Headers        stringList
 }
 
 type cookiesConfigProps struct {
 	CookieBehavior string
-	Cookies        StringList
+	Cookies        stringList
 }
 
 type queryStringsConfigProps struct {
 	QueryStringBehavior string
-	QueryStrings        StringList
+	QueryStrings        stringList
 }
 
 // --- AWS::CloudFront::OriginRequestPolicy ---
@@ -279,13 +279,13 @@ type responseHeadersPolicyConfigProps struct {
 }
 
 type corsConfigProps struct {
-	AccessControlAllowCredentials *FlexBool
-	AccessControlAllowHeaders     StringList
-	AccessControlAllowMethods     StringList
-	AccessControlAllowOrigins     StringList
-	AccessControlExposeHeaders    StringList
-	AccessControlMaxAgeSec        *FlexInt
-	OriginOverride                *FlexBool
+	AccessControlAllowCredentials *flexBool
+	AccessControlAllowHeaders     stringList
+	AccessControlAllowMethods     stringList
+	AccessControlAllowOrigins     stringList
+	AccessControlExposeHeaders    stringList
+	AccessControlMaxAgeSec        *flexInt
+	OriginOverride                *flexBool
 }
 
 type customHeadersConfigProps struct {
@@ -295,7 +295,7 @@ type customHeadersConfigProps struct {
 type customHeaderProps struct {
 	Header   string
 	Value    string
-	Override *FlexBool
+	Override *flexBool
 }
 
 type removeHeadersConfigProps struct {
@@ -317,34 +317,34 @@ type securityHeadersConfigProps struct {
 
 type cspProps struct {
 	ContentSecurityPolicy string
-	Override              *FlexBool
+	Override              *flexBool
 }
 
 type contentTypeOptionsProps struct {
-	Override *FlexBool
+	Override *flexBool
 }
 
 type frameOptionsProps struct {
 	FrameOption string
-	Override    *FlexBool
+	Override    *flexBool
 }
 
 type referrerPolicyProps struct {
 	ReferrerPolicy string
-	Override       *FlexBool
+	Override       *flexBool
 }
 
 type hstsProps struct {
-	AccessControlMaxAgeSec *FlexInt
-	IncludeSubdomains      *FlexBool
-	Preload                *FlexBool
-	Override               *FlexBool
+	AccessControlMaxAgeSec *flexInt
+	IncludeSubdomains      *flexBool
+	Preload                *flexBool
+	Override               *flexBool
 }
 
 type xssProtectionProps struct {
-	ModeBlock  *FlexBool
-	Override   *FlexBool
-	Protection *FlexBool
+	ModeBlock  *flexBool
+	Override   *flexBool
+	Protection *flexBool
 	ReportUri  string
 }
 
@@ -398,7 +398,7 @@ type keyGroupProps struct {
 
 type keyGroupConfigProps struct {
 	Comment string
-	Items   StringList
+	Items   stringList
 	Name    string
 }
 

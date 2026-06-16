@@ -327,7 +327,7 @@ func (b *builder) distribution(res *cfntmpl.Resource) error {
 		b.warnf("distribution %s is disabled (Enabled: false) and will not be served", res.LogicalID)
 	}
 
-	for _, alias := range append(append(StringList{}, cfg.Aliases...), cfg.CNAMEs...) {
+	for _, alias := range append(append(stringList{}, cfg.Aliases...), cfg.CNAMEs...) {
 		if cfntmpl.IsUnresolved(alias) {
 			return fmt.Errorf("alias could not be resolved: %s", alias)
 		}
@@ -476,7 +476,7 @@ var (
 	methodsAll            = []string{"DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"}
 )
 
-func normalizeMethods(kind string, methods StringList, def []string, allowAll bool) ([]string, error) {
+func normalizeMethods(kind string, methods stringList, def []string, allowAll bool) ([]string, error) {
 	if len(methods) == 0 {
 		return def, nil
 	}
