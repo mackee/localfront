@@ -179,9 +179,10 @@ func (opts Options) setupRuntime(rt *qjs.Runtime) error {
 		if len(args) < 1 {
 			return nil, fmt.Errorf("kvs get requires a key")
 		}
-		v, ok := kvs.Get(args[0].String())
+		key := args[0].String()
+		v, ok := kvs.Get(key)
 		if !ok {
-			return nil, fmt.Errorf("KeyNotFound: %s", args[0].String())
+			return nil, fmt.Errorf("%w: %s", ErrKeyNotFound, key)
 		}
 		return this.Context().NewString(v), nil
 	})

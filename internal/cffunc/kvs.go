@@ -2,9 +2,15 @@ package cffunc
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 )
+
+// ErrKeyNotFound is returned by KVS operations when the key is absent.
+// The cloudfront-js runtime surfaces it as a JS exception that user code
+// can catch around cf.kvs().get().
+var ErrKeyNotFound = errors.New("key not found")
 
 // KVS is an in-memory CloudFront KeyValueStore. It is safe for concurrent use
 // and its contents are swappable atomically (hot reload / re-seed).
