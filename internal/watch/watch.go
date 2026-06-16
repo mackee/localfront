@@ -44,6 +44,11 @@ func Watch(ctx context.Context, files []string, logger *slog.Logger, onChange fu
 
 	var timer *time.Timer
 	var timerC <-chan time.Time
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
 	for {
 		select {
 		case <-ctx.Done():
