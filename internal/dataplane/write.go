@@ -38,13 +38,19 @@ func (s *Server) writeResponse(w http.ResponseWriter, r *http.Request, dist *con
 		return
 	}
 
-	compressed, err := compressBody(encoding, resp.body)
+	raw, err := io.ReadAll(resp.body)
 	if err != nil {
-		// Fall back to the uncompressed body on a compression failure.
+		s.logger.Debug("reading origin response failed", "error", err)
+		w.WriteHeader(http.StatusBadGateway)
+		return
+	}
+	compressed, err := compressBytes(encoding, raw)
+	if err != nil {
 		s.logger.Debug("compressing response failed; sending uncompressed", "error", err)
+		out.Set("Content-Length", strconv.Itoa(len(raw)))
 		w.WriteHeader(resp.statusCode)
-		if _, copyErr := io.Copy(w, resp.body); copyErr != nil {
-			s.logger.Debug("copying origin response failed", "error", copyErr)
+		if _, err := w.Write(raw); err != nil {
+			s.logger.Debug("writing uncompressed response failed", "error", err)
 		}
 		return
 	}
@@ -57,10 +63,10 @@ func (s *Server) writeResponse(w http.ResponseWriter, r *http.Request, dist *con
 	}
 }
 
-// compressBody reads body fully and compresses it. The body length is bounded
-// by behavior.ChooseEncoding to CloudFront's 10 MB compression ceiling, so
-// buffering it is safe.
-func compressBody(encoding string, body io.Reader) ([]byte, error) {
+// compressBytes compresses an already-buffered body. CloudFront's 10 MB
+// compression ceiling (enforced via behavior.ChooseEncoding) makes buffering
+// safe.
+func compressBytes(encoding string, raw []byte) ([]byte, error) {
 	var buf bytes.Buffer
 	var wc io.WriteCloser
 	switch encoding {
@@ -71,7 +77,7 @@ func compressBody(encoding string, body io.Reader) ([]byte, error) {
 	default:
 		return nil, io.ErrNoProgress
 	}
-	if _, err := io.Copy(wc, body); err != nil {
+	if _, err := wc.Write(raw); err != nil {
 		_ = wc.Close()
 		return nil, err
 	}
