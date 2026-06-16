@@ -186,6 +186,27 @@ func TestVerify_CustomURL_ResourceWithQueryString(t *testing.T) {
 	}
 }
 
+// A custom-policy Resource with an exact, percent-encoded path must match the
+// request's escaped path, not net/http's decoded r.URL.Path (the canned path is
+// already handled by TestVerify_CannedURL_EscapedPath).
+func TestVerify_CustomURL_EscapedPath(t *testing.T) {
+	priv, trusted := testKey(t)
+	signer := awssign.NewURLSigner(keyPairID, priv)
+	policy := &awssign.Policy{Statements: []awssign.Statement{{
+		Resource: "https://media.example.test/premium/my%20video.mp4",
+		Condition: awssign.Condition{
+			DateLessThan: awssign.NewAWSEpochTime(time.Now().Add(time.Hour)),
+		},
+	}}}
+	signed, err := signer.SignWithPolicy("https://media.example.test/premium/my%20video.mp4", policy)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	if err := sign.Verify(requestFromSignedURL(signed), trusted, time.Now(), ""); err != nil {
+		t.Errorf("custom signed URL with an escaped resource path should verify, got: %v", err)
+	}
+}
+
 // A request for the distribution root is served (and was signed) as the default
 // root object, so verification must resolve it before matching.
 func TestVerify_CannedURL_DefaultRootObject(t *testing.T) {

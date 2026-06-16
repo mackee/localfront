@@ -4,6 +4,7 @@
 package config
 
 import (
+	"slices"
 	"strings"
 	"time"
 )
@@ -107,8 +108,17 @@ type ListSelection struct {
 	Items    []string
 }
 
-// Contains reports whether name is in the item list, case-insensitively.
+// Contains reports whether name is in the item list, matched case-sensitively.
+// CloudFront treats cookie and query-string names as case-sensitive, so their
+// selection uses this; header selection uses ContainsFold.
 func (s ListSelection) Contains(name string) bool {
+	return slices.Contains(s.Items, name)
+}
+
+// ContainsFold reports whether name is in the item list, matched
+// case-insensitively. HTTP header names are case-insensitive, so header
+// selection uses this instead of Contains.
+func (s ListSelection) ContainsFold(name string) bool {
 	for _, it := range s.Items {
 		if strings.EqualFold(it, name) {
 			return true

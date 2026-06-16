@@ -47,7 +47,14 @@ func NewS3Client(endpoint, region, accessKey, secretKey string, transport http.R
 		region = "us-east-1"
 	}
 	if transport == nil {
-		transport = http.DefaultTransport
+		// http.DefaultTransport auto-adds Accept-Encoding: gzip and then
+		// transparently decompresses the response it caused, which would replace
+		// the stored object's bytes. The store's response must be forwarded
+		// verbatim (gzip objects, Content-Encoding, Vary on Accept-Encoding), so
+		// use a clone with compression disabled.
+		t := http.DefaultTransport.(*http.Transport).Clone()
+		t.DisableCompression = true
+		transport = t
 	}
 	return &S3Client{
 		endpoint:  u,

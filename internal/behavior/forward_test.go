@@ -60,6 +60,14 @@ func TestBuildOriginRequest_Headers(t *testing.T) {
 			wantAbsent:  []string{"X-Custom"},
 		},
 		{
+			// Header names are case-insensitive: a lowercase whitelist entry
+			// still matches the canonical request header.
+			name:        "header whitelist matches case-insensitively",
+			cache:       &config.CachePolicy{Headers: sel("whitelist", "authorization")},
+			reqHeaders:  map[string]string{"Authorization": "bearer"},
+			wantForward: []string{"Authorization"},
+		},
+		{
 			// Legacy ForwardedValues.Headers: ['*'] maps to Behavior "all".
 			name:        "legacy all forwards every viewer header",
 			cache:       &config.CachePolicy{Headers: sel("all")},
@@ -167,6 +175,9 @@ func TestBuildOriginRequest_Cookies(t *testing.T) {
 		{"whitelist keeps listed", sel("whitelist", "b"), config.ListSelection{}, "a=1; b=2; c=3", "b=2"},
 		{"allExcept drops listed", sel("allExcept", "a"), config.ListSelection{}, "a=1; b=2", "b=2"},
 		{"union of cache and orp", sel("whitelist", "a"), sel("whitelist", "c"), "a=1; b=2; c=3", "a=1; c=3"},
+		// Cookie names are case-sensitive in CloudFront: a whitelist for the
+		// lowercase name must not also keep the differently-cased cookie.
+		{"whitelist is case-sensitive", sel("whitelist", "session"), config.ListSelection{}, "session=keep; Session=drop", "session=keep"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -197,6 +208,8 @@ func TestBuildOriginRequest_QueryStrings(t *testing.T) {
 		{"whitelist keeps listed in order", sel("whitelist", "a"), config.ListSelection{}, "a=1&b=2&a=3", "a=1&a=3"},
 		{"allExcept drops listed", sel("allExcept", "token"), config.ListSelection{}, "token=x&page=2", "page=2"},
 		{"union", sel("whitelist", "a"), sel("whitelist", "c"), "a=1&b=2&c=3", "a=1&c=3"},
+		// Query-string names are case-sensitive in CloudFront.
+		{"whitelist is case-sensitive", sel("whitelist", "token"), config.ListSelection{}, "token=keep&Token=drop", "token=keep"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

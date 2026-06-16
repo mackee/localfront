@@ -2,6 +2,7 @@ package origin
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"io"
@@ -375,6 +376,50 @@ func TestFetch_LiveRoundTrip(t *testing.T) {
 	}
 	if capturedPath != "/mybucket/mykey.txt" {
 		t.Errorf("server saw path %q, want /mybucket/mykey.txt", capturedPath)
+	}
+}
+
+// A gzip-compressed object must be forwarded verbatim. When transport is nil
+// the client uses a clone of http.DefaultTransport, which (unless compression is
+// disabled) would auto-add Accept-Encoding: gzip and transparently decompress
+// the response, replacing the object's stored bytes.
+func TestFetch_GzipObjectForwardedVerbatim(t *testing.T) {
+	var sawAcceptEncoding string
+	var gzipped bytes.Buffer
+	gw := gzip.NewWriter(&gzipped)
+	_, _ = io.WriteString(gw, "compressed payload")
+	_ = gw.Close()
+	stored := gzipped.Bytes()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawAcceptEncoding = r.Header.Get("Accept-Encoding")
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(stored)
+	}))
+	defer ts.Close()
+
+	// transport=nil → real DefaultTransport clone with compression disabled.
+	c, err := NewS3Client(ts.URL, "us-east-1", "ak", "sk", nil)
+	if err != nil {
+		t.Fatalf("NewS3Client: %v", err)
+	}
+	resp, err := c.Fetch(context.Background(), &Request{Bucket: "b", Key: "k"})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if sawAcceptEncoding != "" {
+		t.Errorf("origin saw Accept-Encoding %q, want empty (transport must not inject gzip)", sawAcceptEncoding)
+	}
+	if ce := resp.Header.Get("Content-Encoding"); ce != "gzip" {
+		t.Errorf("Content-Encoding = %q, want gzip (the stored object must be forwarded verbatim)", ce)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !bytes.Equal(body, stored) {
+		t.Errorf("body was altered by the transport: got %d bytes, want the %d stored gzip bytes", len(body), len(stored))
 	}
 }
 

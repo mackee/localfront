@@ -202,7 +202,11 @@ func verifyCustom(r *http.Request, key *rsa.PublicKey, policyParam string, sig [
 			return err
 		}
 	}
-	if !resourceMatches(stmt.resource, applyDefaultRootObject(r.URL.Path, defaultRootObject)) {
+	// EscapedPath preserves the percent-encoding the signer signed into the
+	// policy Resource; net/http has already decoded r.URL.Path, which would
+	// reject a valid request for a resource whose path contains escaped bytes
+	// (the canned path uses EscapedPath for the same reason).
+	if !resourceMatches(stmt.resource, applyDefaultRootObject(r.URL.EscapedPath(), defaultRootObject)) {
 		return deny("the request does not match the signed resource")
 	}
 	return nil

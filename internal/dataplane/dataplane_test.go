@@ -1,6 +1,8 @@
 package dataplane_test
 
 import (
+	"bytes"
+	"compress/gzip"
 	"io"
 	"log/slog"
 	"net"
@@ -381,6 +383,49 @@ func TestProxy_OriginCustomHeaders(t *testing.T) {
 	}
 	if gotViewer != "from-origin-config" {
 		t.Errorf("X-Viewer-Header=%q want=from-origin-config (custom header should override viewer)", gotViewer)
+	}
+}
+
+// A gzip-encoded origin response must be forwarded verbatim. The custom-origin
+// transport disables Go's implicit gzip, so it must neither inject
+// Accept-Encoding: gzip (the policy did not select it) nor decompress the body.
+func TestProxy_GzipResponseForwardedVerbatim(t *testing.T) {
+	var sawAcceptEncoding string
+	var gzipped bytes.Buffer
+	gw := gzip.NewWriter(&gzipped)
+	_, _ = io.WriteString(gw, "compressed origin body")
+	_ = gw.Close()
+	stored := gzipped.Bytes()
+
+	_, host, port := newTestOriginServer(t, func(w http.ResponseWriter, r *http.Request) {
+		sawAcceptEncoding = r.Header.Get("Accept-Encoding")
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(stored)
+	})
+
+	origin := baseOrigin("o1", host, port)
+	dist := baseDistribution("D1", "d1.cloudfront.localhost", []string{"assets.example.test"}, origin)
+	cfg := &config.Config{Distributions: []*config.Distribution{dist}}
+	srv := dataplane.New(cfg, newLogger())
+
+	req := httptest.NewRequest(http.MethodGet, "http://assets.example.test/", nil)
+	req.Host = "assets.example.test"
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d want=200", rr.Code)
+	}
+	if sawAcceptEncoding != "" {
+		t.Errorf("origin saw Accept-Encoding %q, want empty (policy did not forward it; transport must not inject gzip)", sawAcceptEncoding)
+	}
+	if ce := rr.Header().Get("Content-Encoding"); ce != "gzip" {
+		t.Errorf("Content-Encoding=%q want=gzip (origin response must pass through)", ce)
+	}
+	if !bytes.Equal(rr.Body.Bytes(), stored) {
+		t.Errorf("body was altered: got %d bytes, want the %d gzip bytes the origin sent", rr.Body.Len(), len(stored))
 	}
 }
 

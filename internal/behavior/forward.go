@@ -104,11 +104,11 @@ func headerSelected(sel config.ListSelection, name string, allowViewer bool) boo
 		// header (mapped to "all" by cachePolicyFromForwardedValues).
 		return true
 	case "whitelist":
-		return sel.Contains(name)
+		return sel.ContainsFold(name)
 	case "allViewer", "allViewerAndWhitelistCloudFront":
 		return allowViewer
 	case "allExcept":
-		return allowViewer && !sel.Contains(name)
+		return allowViewer && !sel.ContainsFold(name)
 	default: // none / unset
 		return false
 	}
@@ -118,7 +118,7 @@ func headerSelected(sel config.ListSelection, name string, allowViewer bool) boo
 // forwarded. Only an explicit whitelist (cache or ORP) or the ORP's
 // allViewerAndWhitelistCloudFront list adds these; plain allViewer does not.
 func selectsCloudFrontHeader(cache *config.CachePolicy, orp *config.OriginRequestPolicy, name string) bool {
-	if cache != nil && cache.Headers.Behavior == "whitelist" && cache.Headers.Contains(name) {
+	if cache != nil && cache.Headers.Behavior == "whitelist" && cache.Headers.ContainsFold(name) {
 		return true
 	}
 	if orp == nil {
@@ -126,7 +126,7 @@ func selectsCloudFrontHeader(cache *config.CachePolicy, orp *config.OriginReques
 	}
 	switch orp.Headers.Behavior {
 	case "whitelist", "allViewerAndWhitelistCloudFront":
-		return orp.Headers.Contains(name)
+		return orp.Headers.ContainsFold(name)
 	default:
 		return false
 	}

@@ -22,6 +22,12 @@ func newTransport() *http.Transport {
 		ForceAttemptHTTP2: true,
 		MaxIdleConns:      100,
 		IdleConnTimeout:   90 * time.Second,
+		// CloudFront sends Accept-Encoding to the origin only when a policy
+		// selects it (handled above) and forwards the origin's body verbatim.
+		// Disable Go's implicit gzip so the transport neither injects
+		// Accept-Encoding: gzip when the policy stripped it nor transparently
+		// decompresses the response it caused.
+		DisableCompression: true,
 	}
 }
 
