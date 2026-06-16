@@ -14,6 +14,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -33,19 +34,19 @@ type Key struct {
 func ParsePublicKey(encoded string) (*rsa.PublicKey, error) {
 	block, _ := pem.Decode([]byte(encoded))
 	if block == nil {
-		return nil, fmt.Errorf("no PEM block found")
+		return nil, errors.New("no PEM block found")
 	}
 	if key, err := x509.ParsePKIXPublicKey(block.Bytes); err == nil {
 		rsaKey, ok := key.(*rsa.PublicKey)
 		if !ok {
-			return nil, fmt.Errorf("public key is not RSA")
+			return nil, errors.New("public key is not RSA")
 		}
 		return rsaKey, nil
 	}
 	if key, err := x509.ParsePKCS1PublicKey(block.Bytes); err == nil {
 		return key, nil
 	}
-	return nil, fmt.Errorf("unsupported public key format (expected PKIX or PKCS#1 RSA)")
+	return nil, errors.New("unsupported public key format (expected PKIX or PKCS#1 RSA)")
 }
 
 // DenyError reports why access was denied. The data plane maps it to a 403.

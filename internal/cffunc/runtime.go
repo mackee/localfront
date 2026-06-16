@@ -96,11 +96,11 @@ func (r *Result) IsResponse() bool { return r.Response != nil }
 func (f *Function) Execute(event *Event) (*Result, error) {
 	payload, err := json.Marshal(event)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("marshaling function event: %w", err)
 	}
 	rt, err := f.pool.get()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("acquiring runtime for function %s: %w", f.name, err)
 	}
 	reusable := false
 	defer func() {
