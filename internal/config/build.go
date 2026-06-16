@@ -495,21 +495,8 @@ func normalizeMethods(kind string, methods StringList, def []string, allowAll bo
 }
 
 func (b *builder) buildBehavior(props *behaviorProps, origins map[string]*Origin, isDefault bool, distLogicalID string, idx int) (*Behavior, error) {
-	if isDefault && props.PathPattern != "" {
-		return nil, fmt.Errorf("DefaultCacheBehavior must not have a PathPattern")
-	}
-	if !isDefault && props.PathPattern == "" {
-		return nil, fmt.Errorf("PathPattern is required")
-	}
-	switch {
-	case len(props.LambdaFunctionAssociations) > 0:
-		return nil, fmt.Errorf("Lambda@Edge is intentionally not supported; use CloudFront Functions")
-	case props.FieldLevelEncryptionId != "":
-		return nil, fmt.Errorf("field-level encryption is not supported")
-	case props.RealtimeLogConfigArn != "":
-		return nil, fmt.Errorf("real-time logs are not supported")
-	case len(props.TrustedSigners) > 0:
-		return nil, fmt.Errorf("legacy TrustedSigners are not supported; use TrustedKeyGroups")
+	if err := validateBehaviorShape(props, isDefault); err != nil {
+		return nil, err
 	}
 	origin, ok := origins[props.TargetOriginId]
 	if !ok {
@@ -528,51 +515,94 @@ func (b *builder) buildBehavior(props *behaviorProps, origins map[string]*Origin
 	if bh.CachedMethods, err = normalizeMethods("CachedMethods", props.CachedMethods, methodsGetHead, false); err != nil {
 		return nil, err
 	}
+	if bh.CachePolicy, err = b.resolveCachePolicy(props, distLogicalID, idx); err != nil {
+		return nil, err
+	}
+	if bh.OriginRequestPolicy, err = b.resolveOriginRequestPolicy(props); err != nil {
+		return nil, err
+	}
+	if bh.ResponseHeadersPolicy, err = resolvePolicy(b.responseHeadersPolicies, props.ResponseHeadersPolicyId, "ResponseHeadersPolicyId", "response headers policy"); err != nil {
+		return nil, err
+	}
+	if bh.TrustedKeyGroups, err = b.resolveTrustedKeyGroups(props.TrustedKeyGroups); err != nil {
+		return nil, err
+	}
+	if err := b.applyFunctionAssociations(bh, props.FunctionAssociations); err != nil {
+		return nil, err
+	}
+	return bh, nil
+}
 
+// validateBehaviorShape rejects unsupported feature combinations and shape
+// errors before any policy lookups run.
+func validateBehaviorShape(props *behaviorProps, isDefault bool) error {
+	if isDefault && props.PathPattern != "" {
+		return fmt.Errorf("DefaultCacheBehavior must not have a PathPattern")
+	}
+	if !isDefault && props.PathPattern == "" {
+		return fmt.Errorf("PathPattern is required")
+	}
+	switch {
+	case len(props.LambdaFunctionAssociations) > 0:
+		return fmt.Errorf("Lambda@Edge is intentionally not supported; use CloudFront Functions")
+	case props.FieldLevelEncryptionId != "":
+		return fmt.Errorf("field-level encryption is not supported")
+	case props.RealtimeLogConfigArn != "":
+		return fmt.Errorf("real-time logs are not supported")
+	case len(props.TrustedSigners) > 0:
+		return fmt.Errorf("legacy TrustedSigners are not supported; use TrustedKeyGroups")
+	}
+	return nil
+}
+
+// resolvePolicy looks up a referenced policy by its resolved ID. propName is
+// the CloudFormation property the ID came from (e.g. "CachePolicyId"); kind is
+// the human-readable entity name used when no match is found. An empty id
+// returns (nil, nil) — the property is optional on the behavior.
+func resolvePolicy[T any](policies map[string]*T, id, propName, kind string) (*T, error) {
+	if id == "" {
+		return nil, nil
+	}
+	if cfntmpl.IsUnresolved(id) {
+		return nil, fmt.Errorf("%s could not be resolved: %s", propName, id)
+	}
+	p, ok := policies[id]
+	if !ok {
+		return nil, fmt.Errorf("%s %s is neither defined in the loaded templates nor a managed policy", kind, id)
+	}
+	return p, nil
+}
+
+func (b *builder) resolveCachePolicy(props *behaviorProps, distLogicalID string, idx int) (*CachePolicy, error) {
 	switch {
 	case props.CachePolicyId != "" && props.ForwardedValues != nil:
 		return nil, fmt.Errorf("CachePolicyId and legacy ForwardedValues cannot be combined")
 	case props.CachePolicyId != "":
-		if cfntmpl.IsUnresolved(props.CachePolicyId) {
-			return nil, fmt.Errorf("CachePolicyId could not be resolved: %s", props.CachePolicyId)
-		}
-		cp, ok := b.cachePolicies[props.CachePolicyId]
-		if !ok {
-			return nil, fmt.Errorf("cache policy %s is neither defined in the loaded templates nor a managed policy", props.CachePolicyId)
-		}
-		bh.CachePolicy = cp
+		return resolvePolicy(b.cachePolicies, props.CachePolicyId, "CachePolicyId", "cache policy")
 	case props.ForwardedValues != nil:
 		name := fmt.Sprintf("legacy-forwarded-values-%s-%d", distLogicalID, idx)
-		bh.CachePolicy = cachePolicyFromForwardedValues(name, props)
+		return cachePolicyFromForwardedValues(name, props), nil
 	default:
 		return nil, fmt.Errorf("a behavior requires CachePolicyId (or legacy ForwardedValues)")
 	}
+}
 
-	if props.OriginRequestPolicyId != "" {
-		if props.ForwardedValues != nil {
-			return nil, fmt.Errorf("OriginRequestPolicyId and legacy ForwardedValues cannot be combined")
-		}
-		if cfntmpl.IsUnresolved(props.OriginRequestPolicyId) {
-			return nil, fmt.Errorf("OriginRequestPolicyId could not be resolved: %s", props.OriginRequestPolicyId)
-		}
-		orp, ok := b.originRequestPolicies[props.OriginRequestPolicyId]
-		if !ok {
-			return nil, fmt.Errorf("origin request policy %s is neither defined in the loaded templates nor a managed policy", props.OriginRequestPolicyId)
-		}
-		bh.OriginRequestPolicy = orp
+func (b *builder) resolveOriginRequestPolicy(props *behaviorProps) (*OriginRequestPolicy, error) {
+	if props.OriginRequestPolicyId == "" {
+		return nil, nil
 	}
-	if props.ResponseHeadersPolicyId != "" {
-		if cfntmpl.IsUnresolved(props.ResponseHeadersPolicyId) {
-			return nil, fmt.Errorf("ResponseHeadersPolicyId could not be resolved: %s", props.ResponseHeadersPolicyId)
-		}
-		rhp, ok := b.responseHeadersPolicies[props.ResponseHeadersPolicyId]
-		if !ok {
-			return nil, fmt.Errorf("response headers policy %s is neither defined in the loaded templates nor a managed policy", props.ResponseHeadersPolicyId)
-		}
-		bh.ResponseHeadersPolicy = rhp
+	if props.ForwardedValues != nil {
+		return nil, fmt.Errorf("OriginRequestPolicyId and legacy ForwardedValues cannot be combined")
 	}
+	return resolvePolicy(b.originRequestPolicies, props.OriginRequestPolicyId, "OriginRequestPolicyId", "origin request policy")
+}
 
-	for _, kgID := range props.TrustedKeyGroups {
+func (b *builder) resolveTrustedKeyGroups(ids []string) ([]*KeyGroup, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	out := make([]*KeyGroup, 0, len(ids))
+	for _, kgID := range ids {
 		if cfntmpl.IsUnresolved(kgID) {
 			return nil, fmt.Errorf("TrustedKeyGroups entry could not be resolved: %s", kgID)
 		}
@@ -580,31 +610,39 @@ func (b *builder) buildBehavior(props *behaviorProps, origins map[string]*Origin
 		if !ok {
 			return nil, fmt.Errorf("key group %s is not defined in the loaded templates", kgID)
 		}
-		bh.TrustedKeyGroups = append(bh.TrustedKeyGroups, kg)
+		out = append(out, kg)
 	}
+	return out, nil
+}
 
-	for i, assoc := range props.FunctionAssociations {
+func (b *builder) applyFunctionAssociations(bh *Behavior, assocs []functionAssociationProps) error {
+	for i, assoc := range assocs {
 		if cfntmpl.IsUnresolved(assoc.FunctionARN) {
-			return nil, fmt.Errorf("FunctionAssociations/%d: FunctionARN could not be resolved: %s", i, assoc.FunctionARN)
+			return fmt.Errorf("FunctionAssociations/%d: FunctionARN could not be resolved: %s", i, assoc.FunctionARN)
 		}
 		fn, ok := b.functionsByARN[assoc.FunctionARN]
 		if !ok {
-			return nil, fmt.Errorf("FunctionAssociations/%d: function %s is not defined in the loaded templates", i, assoc.FunctionARN)
+			return fmt.Errorf("FunctionAssociations/%d: function %s is not defined in the loaded templates", i, assoc.FunctionARN)
 		}
-		switch assoc.EventType {
-		case "viewer-request":
-			if bh.ViewerRequest != nil {
-				return nil, fmt.Errorf("FunctionAssociations/%d: duplicate viewer-request association", i)
-			}
-			bh.ViewerRequest = fn
-		case "viewer-response":
-			if bh.ViewerResponse != nil {
-				return nil, fmt.Errorf("FunctionAssociations/%d: duplicate viewer-response association", i)
-			}
-			bh.ViewerResponse = fn
-		default:
-			return nil, fmt.Errorf("FunctionAssociations/%d: invalid EventType %q (CloudFront Functions support viewer-request and viewer-response)", i, assoc.EventType)
+		slot, err := behaviorFunctionSlot(bh, assoc.EventType)
+		if err != nil {
+			return fmt.Errorf("FunctionAssociations/%d: %w", i, err)
 		}
+		if *slot != nil {
+			return fmt.Errorf("FunctionAssociations/%d: duplicate %s association", i, assoc.EventType)
+		}
+		*slot = fn
 	}
-	return bh, nil
+	return nil
+}
+
+func behaviorFunctionSlot(bh *Behavior, eventType string) (**Function, error) {
+	switch eventType {
+	case "viewer-request":
+		return &bh.ViewerRequest, nil
+	case "viewer-response":
+		return &bh.ViewerResponse, nil
+	default:
+		return nil, fmt.Errorf("invalid EventType %q (CloudFront Functions support viewer-request and viewer-response)", eventType)
+	}
 }
