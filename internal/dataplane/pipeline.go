@@ -2,6 +2,7 @@ package dataplane
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"time"
@@ -49,7 +50,12 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, dist *config.Dist
 	if len(beh.TrustedKeyGroups) > 0 {
 		if err := sign.Verify(r, snap.trustedKeys(beh), time.Now(), dist.DefaultRootObject, s.publicHost); err != nil {
 			s.logger.Info("signed URL/cookie verification failed", "distribution", dist.LogicalID, "reason", err)
-			writeCFError(w, http.StatusForbidden, requestID, "Access denied: "+err.Error())
+			var denyErr *sign.DenyError
+			if errors.As(err, &denyErr) {
+				writeCFError(w, http.StatusForbidden, requestID, "Access denied: "+denyErr.Message)
+			} else {
+				writeCFError(w, http.StatusForbidden, requestID, "Access denied.")
+			}
 			return
 		}
 	}
