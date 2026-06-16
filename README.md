@@ -24,7 +24,7 @@ localfront deliberately has **no management API**. Configuration is a CloudForma
 - Supported resource types: `AWS::CloudFront::Distribution`, `AWS::CloudFront::Function`, `AWS::CloudFront::KeyValueStore`, `AWS::CloudFront::CachePolicy`, `AWS::CloudFront::OriginRequestPolicy`, `AWS::CloudFront::ResponseHeadersPolicy`, `AWS::CloudFront::PublicKey`, `AWS::CloudFront::KeyGroup`, `AWS::CloudFront::OriginAccessControl`. Unknown resource types are skipped with a warning.
 - AWS **managed policies** are built in under their well-known IDs (`Managed-CachingOptimized`, `Managed-CachingDisabled`, `Managed-AllViewer`, `Managed-CORS-S3Origin`, …). Legacy `ForwardedValues` is also accepted.
 - Intrinsic functions: a pragmatic subset — `Ref` and `Fn::GetAtt` between resources in the loaded templates, `Fn::Sub`, `Fn::Join`, `Fn::FindInMap`, and `Parameters` (defaults, overridable with `--parameter key=value`). Anything unresolvable (e.g. `Fn::ImportValue`) fails template loading with a clear error.
-- KeyValueStore contents are seeded from the resource's `ImportSource` (fetched from the configured S3-compatible store) or from a local JSON file via `--kvs-seed <store>=<file.json>`.
+- KeyValueStore contents are seeded from the resource's `ImportSource` (fetched from the configured S3-compatible store) or from a local JSON file via `--kvs-seed <store>=<file.json>`. A `--kvs-seed` replaces the store's contents and skips the `ImportSource` fetch entirely, so it works offline without `--s3-endpoint`.
 - localfront is **stateless**: the templates, seed files, and the object store are the entire configuration. There is no state directory and no write API.
 
 ### Data plane (the actual proxy)
@@ -33,7 +33,7 @@ localfront deliberately has **no management API**. Configuration is a CloudForma
 - **Origins** — custom HTTP(S) origins (origin path, custom headers, protocol policy), and S3 origins backed by an external S3-compatible object store (see [S3 origins](#s3-origins-external-object-storage)).
 - **Default root object** and **custom error responses** — including the classic SPA fallback (`403/404 → /index.html` with status 200).
 - **CloudFront Functions** at viewer-request / viewer-response, with cloudfront-js 2.0 semantics and KVS bindings.
-- **Signed URLs & signed cookies** — canned and custom policies, verified against the trusted key groups of restricted behaviors.
+- **Signed URLs & signed cookies** — canned and custom policies, verified against the trusted key groups of restricted behaviors. A canned signature covers the exact resource URL, so localfront reconstructs it from `--public-host` (required; env `LOCALFRONT_PUBLIC_HOST`) — the host (optionally `host:port`) you signed the URLs for. The port, when present, is part of the signed resource (real CloudFront only serves on 443/80, so its signed URLs never carry one — sign your local URLs for the address you actually reach localfront at).
 - **Host-based routing** — distributions are matched by their aliases (CNAMEs); each also gets a stable generated ID derived from its template logical ID, reachable as `<distribution-id>.cloudfront.localhost`.
 - **CloudFront request/response headers** — `X-Amz-Cf-Id`, `Via`, `X-Cache`, `X-Forwarded-For`, and the `CloudFront-Viewer-*` / device-detection headers selected by the origin request policy. Viewer header values (country, device, …) can be overridden per request to test geo- or device-dependent code.
 - **Pass-through of conditional and range requests** (`If-None-Match` / `If-Modified-Since`, `Range`, `HEAD`) to origins.
@@ -87,6 +87,7 @@ The PoC **does not cache**. Cache policies are still interpreted — they determ
 $ docker run -d -p 9000:9000 rustfs/rustfs        # S3-compatible origin storage
 $ go install github.com/mackee/localfront/cmd/localfront@latest
 $ localfront serve --template ./template.yaml \
+    --public-host   assets.example.test:8080 \
     --s3-endpoint   http://localhost:9000 \
     --s3-access-key rustfsadmin \
     --s3-secret-key rustfsadmin

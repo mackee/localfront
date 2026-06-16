@@ -3,6 +3,7 @@ module github.com/mackee/localfront
 go 1.26.1
 
 require (
+	github.com/alecthomas/kong v1.15.0
 	github.com/andybalholm/brotli v1.2.1
 	github.com/aws/aws-sdk-go-v2/feature/cloudfront/sign v1.11.6
 	github.com/fastschema/qjs v0.0.6

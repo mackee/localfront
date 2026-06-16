@@ -574,6 +574,12 @@ func TestProxy_HopByHopHeadersNotForwarded(t *testing.T) {
 
 	origin := baseOrigin("o1", host, port)
 	dist := baseDistribution("D1", "d1.cloudfront.localhost", []string{"assets.example.test"}, origin)
+	// Whitelist X-My-Conn-Header so it would reach the origin on policy grounds:
+	// it must still be dropped because the viewer named it in Connection.
+	dist.DefaultBehavior.CachePolicy.Headers = config.ListSelection{
+		Behavior: "whitelist",
+		Items:    []string{"X-My-Conn-Header"},
+	}
 	cfg := &config.Config{Distributions: []*config.Distribution{dist}}
 	srv := dataplane.New(cfg, newLogger())
 

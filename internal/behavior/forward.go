@@ -36,16 +36,26 @@ func BuildOriginRequest(b *config.Behavior, r *http.Request, viewerHeaders http.
 
 	out := OriginRequest{Headers: http.Header{}}
 
+	// Header names the viewer flagged as connection-specific (RFC 9110): these
+	// are hop-by-hop and must never reach the origin, even if a policy
+	// whitelists them. They are collected here, while the viewer's Connection
+	// header is still in scope — the data plane strips the standard hop-by-hop
+	// set later, but by then the filtered header set no longer carries the
+	// Connection header that names them.
+	connectionListed := connectionListedHeaders(r.Header)
+
 	// 1. Viewer-supplied headers, filtered by the union of both policies. Host,
-	// Cookie, and Accept-Encoding are handled separately; control headers and
-	// any viewer-supplied CloudFront-* headers are dropped (hop-by-hop headers
-	// are stripped later by the data plane).
+	// Cookie, and Accept-Encoding are handled separately; control headers,
+	// connection-specific headers, and any viewer-supplied CloudFront-* headers
+	// are dropped (the remaining hop-by-hop headers are stripped by the data
+	// plane).
 	for name, values := range r.Header {
 		switch {
 		case strings.EqualFold(name, "Host"),
 			strings.EqualFold(name, "Cookie"),
 			strings.EqualFold(name, "Accept-Encoding"),
 			isCloudFrontHeader(name),
+			connectionListed[http.CanonicalHeaderKey(name)],
 			hasPrefixFold(name, localfrontViewerPrefix):
 			continue
 		}
@@ -73,6 +83,25 @@ func BuildOriginRequest(b *config.Behavior, r *http.Request, viewerHeaders http.
 
 func isCloudFrontHeader(name string) bool {
 	return hasPrefixFold(name, cloudFrontHeaderPrefix)
+}
+
+// connectionListedHeaders returns the canonicalized set of header names the
+// viewer named in its Connection header (e.g. "Connection: keep-alive, X-Hop"
+// flags X-Hop). Per RFC 9110 these are connection-specific and must be removed
+// before the request is forwarded.
+func connectionListedHeaders(h http.Header) map[string]bool {
+	var listed map[string]bool
+	for _, value := range h.Values("Connection") {
+		for _, token := range strings.Split(value, ",") {
+			if token = strings.TrimSpace(token); token != "" {
+				if listed == nil {
+					listed = map[string]bool{}
+				}
+				listed[http.CanonicalHeaderKey(token)] = true
+			}
+		}
+	}
+	return listed
 }
 
 // hasPrefixFold reports whether s starts with prefix, case-insensitively. It is

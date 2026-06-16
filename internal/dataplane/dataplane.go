@@ -25,6 +25,10 @@ type Server struct {
 	snap      atomic.Pointer[snapshot]
 	transport http.RoundTripper
 	s3        origin.Fetcher
+	// publicHost is the host (optionally host:port) signed URLs were generated
+	// for, used verbatim to verify canned-policy signatures. Empty means: use
+	// the viewer's Host header as received (see sign.Verify).
+	publicHost string
 }
 
 // snapshot is the swappable per-config state: host routing, the compiled
@@ -58,6 +62,13 @@ type Option func(*Server)
 // origins respond with 502.
 func WithS3Fetcher(f origin.Fetcher) Option {
 	return func(s *Server) { s.s3 = f }
+}
+
+// WithPublicHost sets the host (optionally host:port) that signed URLs were
+// generated for, used verbatim when verifying canned-policy signatures. Leave
+// it empty to derive the host from each request's Host header as received.
+func WithPublicHost(host string) Option {
+	return func(s *Server) { s.publicHost = host }
 }
 
 // New returns a Server serving cfg.

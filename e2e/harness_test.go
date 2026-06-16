@@ -26,6 +26,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -250,6 +251,12 @@ func startLocalfront(t *testing.T, templatePath string, st *store) *localfront {
 func startLocalfrontArgs(t *testing.T, args ...string) *localfront {
 	t.Helper()
 	bin := buildBinary(t)
+
+	// --public-host is required; none of these tests verify signed URLs, so a
+	// placeholder is fine. Inject it unless a caller set its own.
+	if !slices.Contains(args, "--public-host") {
+		args = append(args, "--public-host", "localhost")
+	}
 
 	cmd := exec.Command(bin, args...)
 	stdout, err := cmd.StdoutPipe()

@@ -96,11 +96,14 @@ func closeFunctions(funcs map[string]*cffunc.Function) {
 	}
 }
 
-// buildKVSStores creates and seeds the in-memory KeyValueStores. Each store is
-// seeded from its ImportSource (fetched from the object store) and then, if a
-// matching --kvs-seed was given, overridden by that local file. A store reachable
-// only from disabled distributions is created empty: its ImportSource is not
-// fetched, so it does not force the object-store requirement.
+// buildKVSStores creates and seeds the in-memory KeyValueStores. A matching
+// --kvs-seed replaces the store's contents entirely, and when one is present
+// the ImportSource is skipped: the local seed stands in for the production
+// import, so an offline run needs neither the object store nor a reachable
+// ImportSource. Otherwise the store is seeded from its ImportSource (fetched
+// from the object store). A store reachable only from disabled distributions is
+// created empty: its ImportSource is not fetched, so it does not force the
+// object-store requirement.
 func buildKVSStores(cfg *config.Config, reachableKVS map[string]bool, s3 origin.Fetcher, seeds map[string]string, logger *slog.Logger) (map[string]*cffunc.KVS, error) {
 	stores := map[string]*cffunc.KVS{}
 	usedSeeds := map[string]bool{}
@@ -108,26 +111,8 @@ func buildKVSStores(cfg *config.Config, reachableKVS map[string]bool, s3 origin.
 	for _, kvs := range cfg.KeyValueStores {
 		data := map[string]string{}
 
-		if kvs.ImportSourceARN != "" && reachableKVS[kvs.LogicalID] {
-			if s3 == nil {
-				return nil, fmt.Errorf("KeyValueStore %s has an ImportSource but no object store is configured (set --s3-endpoint)", kvs.Name)
-			}
-			imported, err := loadKVSImportSource(s3, kvs.ImportSourceARN)
-			if err != nil {
-				return nil, fmt.Errorf("KeyValueStore %s ImportSource: %w", kvs.Name, err)
-			}
-			data = imported
-			logger.Info("KeyValueStore seeded from ImportSource", "store", kvs.Name, "keys", len(data))
-		}
-
-		for _, key := range []string{kvs.Name, kvs.LogicalID} {
-			if key == "" {
-				continue
-			}
-			path, ok := seeds[key]
-			if !ok {
-				continue
-			}
+		switch key, path, hasSeed := lookupSeed(seeds, kvs.Name, kvs.LogicalID); {
+		case hasSeed:
 			seeded, err := loadKVSSeedFile(path)
 			if err != nil {
 				return nil, fmt.Errorf("KeyValueStore %s seed file %s: %w", kvs.Name, path, err)
@@ -135,7 +120,16 @@ func buildKVSStores(cfg *config.Config, reachableKVS map[string]bool, s3 origin.
 			data = seeded
 			usedSeeds[key] = true
 			logger.Info("KeyValueStore seeded from file", "store", kvs.Name, "file", path, "keys", len(data))
-			break
+		case kvs.ImportSourceARN != "" && reachableKVS[kvs.LogicalID]:
+			if s3 == nil {
+				return nil, fmt.Errorf("KeyValueStore %s has an ImportSource but no object store is configured (set --s3-endpoint, or provide a local --kvs-seed)", kvs.Name)
+			}
+			imported, err := loadKVSImportSource(s3, kvs.ImportSourceARN)
+			if err != nil {
+				return nil, fmt.Errorf("KeyValueStore %s ImportSource: %w", kvs.Name, err)
+			}
+			data = imported
+			logger.Info("KeyValueStore seeded from ImportSource", "store", kvs.Name, "keys", len(data))
 		}
 
 		store := cffunc.NewKVS()
@@ -149,6 +143,21 @@ func buildKVSStores(cfg *config.Config, reachableKVS map[string]bool, s3 origin.
 		}
 	}
 	return stores, nil
+}
+
+// lookupSeed finds the --kvs-seed entry for a store, matched by its name first
+// and then its logical ID (the precedence buildKVSStores applies). It returns
+// the matched key, the seed file path, and whether a seed was found.
+func lookupSeed(seeds map[string]string, name, logicalID string) (key, path string, ok bool) {
+	for _, k := range []string{name, logicalID} {
+		if k == "" {
+			continue
+		}
+		if p, found := seeds[k]; found {
+			return k, p, true
+		}
+	}
+	return "", "", false
 }
 
 func loadKVSImportSource(s3 origin.Fetcher, arn string) (map[string]string, error) {

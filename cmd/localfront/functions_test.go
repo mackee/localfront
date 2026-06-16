@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/mackee/localfront/internal/config"
@@ -61,12 +63,51 @@ func TestConfigUsesKVSImportSource_IgnoresDisabledOnly(t *testing.T) {
 		Functions:      []*config.Function{fn},
 		KeyValueStores: []*config.KeyValueStore{kvs},
 	}
-	if configUsesKVSImportSource(cfg) {
+	if configUsesKVSImportSource(cfg, nil) {
 		t.Error("import source reachable only from a disabled distribution should not require S3")
 	}
 	cfg.Distributions[0].Enabled = true
-	if !configUsesKVSImportSource(cfg) {
+	if !configUsesKVSImportSource(cfg, nil) {
 		t.Error("import source reachable from an enabled distribution should require S3")
+	}
+	// A local --kvs-seed replaces the ImportSource, so the object store is no
+	// longer required for that store (matched by name or logical ID).
+	if configUsesKVSImportSource(cfg, map[string]string{"store": "seed.json"}) {
+		t.Error("a --kvs-seed for the store should exempt it from the S3 requirement")
+	}
+	if configUsesKVSImportSource(cfg, map[string]string{"Kvs": "seed.json"}) {
+		t.Error("a --kvs-seed matched by logical ID should exempt it from the S3 requirement")
+	}
+}
+
+// A --kvs-seed for a store with an ImportSource must let it build offline: the
+// seed replaces the import, so no object store is fetched even when s3 is nil.
+func TestBuildKVSStores_SeedReplacesImportSource(t *testing.T) {
+	kvs := &config.KeyValueStore{LogicalID: "Kvs", Name: "store", ImportSourceARN: "arn:aws:s3:::b/seed.json"}
+	fn := &config.Function{LogicalID: "Fn", KeyValueStores: []*config.KeyValueStore{kvs}}
+	cfg := &config.Config{
+		Distributions:  []*config.Distribution{{LogicalID: "D1", Enabled: true, DefaultBehavior: fnBehavior(fn)}},
+		Functions:      []*config.Function{fn},
+		KeyValueStores: []*config.KeyValueStore{kvs},
+	}
+
+	seedPath := filepath.Join(t.TempDir(), "seed.json")
+	if err := os.WriteFile(seedPath, []byte(`{"hello":"world"}`), 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+
+	_, reachableKVS := reachableResources(cfg)
+	// s3 is nil: the ImportSource must be skipped because a seed covers the store.
+	stores, err := buildKVSStores(cfg, reachableKVS, nil, map[string]string{"store": seedPath}, testLogger())
+	if err != nil {
+		t.Fatalf("buildKVSStores with a seed should not require S3, got: %v", err)
+	}
+	store, ok := stores["Kvs"]
+	if !ok {
+		t.Fatal("store Kvs was not built")
+	}
+	if got, _ := store.Get("hello"); got != "world" {
+		t.Errorf("store value = %q, want world (seeded from file)", got)
 	}
 }
 

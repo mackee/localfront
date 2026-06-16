@@ -35,6 +35,7 @@ echo ">> [$example] starting localfront"
 "$bin" serve \
   --template "$dir/template.yaml" \
   --listen 127.0.0.1:8080 \
+  --public-host 127.0.0.1:8080 \
   --s3-endpoint http://127.0.0.1:9000 \
   --s3-access-key rustfsadmin \
   --s3-secret-key rustfsadmin &

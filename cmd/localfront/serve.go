@@ -23,7 +23,8 @@ func serve(ctx context.Context, opts *serveOptions, logger *slog.Logger) error {
 		return err
 	}
 
-	var dpOpts []dataplane.Option
+	dpOpts := []dataplane.Option{dataplane.WithPublicHost(opts.publicHost)}
+	logger.Info("verifying canned signed URLs against the public host", "host", opts.publicHost)
 	var s3Client origin.Fetcher
 	if opts.s3Endpoint != "" {
 		client, err := origin.NewS3Client(opts.s3Endpoint, opts.s3Region, opts.s3Access, opts.s3Secret, nil)
@@ -34,7 +35,7 @@ func serve(ctx context.Context, opts *serveOptions, logger *slog.Logger) error {
 		dpOpts = append(dpOpts, dataplane.WithS3Fetcher(client))
 		logger.Info("object store enabled", "endpoint", opts.s3Endpoint, "region", opts.s3Region)
 	}
-	if (configUsesS3(cfg) || configUsesKVSImportSource(cfg)) && s3Client == nil {
+	if (configUsesS3(cfg) || configUsesKVSImportSource(cfg, opts.kvsSeeds)) && s3Client == nil {
 		return fmt.Errorf("the templates use S3 origins or a KeyValueStore ImportSource; provide --s3-endpoint (and --s3-access-key / --s3-secret-key) for the object store")
 	}
 
@@ -162,13 +163,19 @@ func configUsesS3(cfg *config.Config) bool {
 // configUsesKVSImportSource reports whether a KeyValueStore reachable from an
 // enabled distribution loads its seed data from the object store. Stores reached
 // only from disabled distributions are not seeded (see buildKVSStores), so they
-// must not force the --s3-endpoint requirement.
-func configUsesKVSImportSource(cfg *config.Config) bool {
+// must not force the --s3-endpoint requirement. A store covered by a local
+// --kvs-seed is likewise excluded: the seed replaces its ImportSource, so the
+// object store is not needed for it (see buildKVSStores).
+func configUsesKVSImportSource(cfg *config.Config, seeds map[string]string) bool {
 	_, reachableKVS := reachableResources(cfg)
 	for _, kvs := range cfg.KeyValueStores {
-		if kvs.ImportSourceARN != "" && reachableKVS[kvs.LogicalID] {
-			return true
+		if kvs.ImportSourceARN == "" || !reachableKVS[kvs.LogicalID] {
+			continue
 		}
+		if _, _, hasSeed := lookupSeed(seeds, kvs.Name, kvs.LogicalID); hasSeed {
+			continue
+		}
+		return true
 	}
 	return false
 }

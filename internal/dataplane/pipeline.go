@@ -47,7 +47,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, dist *config.Dist
 	// could rewrite the URI the canned policy signs) is still to be confirmed
 	// against a live distribution; localfront verifies before the function runs.
 	if len(beh.TrustedKeyGroups) > 0 {
-		if err := sign.Verify(r, snap.trustedKeys(beh), time.Now(), dist.DefaultRootObject); err != nil {
+		if err := sign.Verify(r, snap.trustedKeys(beh), time.Now(), dist.DefaultRootObject, s.publicHost); err != nil {
 			s.logger.Info("signed URL/cookie verification failed", "distribution", dist.LogicalID, "reason", err)
 			writeCFError(w, http.StatusForbidden, requestID, "Access denied: "+err.Error())
 			return

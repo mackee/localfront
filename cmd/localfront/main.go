@@ -4,58 +4,77 @@ package main
 
 import (
 	"context"
-	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
+
+	"github.com/alecthomas/kong"
 )
 
-const rootUsage = `localfront is a local Amazon CloudFront emulator driven by CloudFormation templates.
+const rootDescription = "localfront is a local Amazon CloudFront emulator driven by CloudFormation templates."
 
-Usage:
-  localfront serve [flags]
+// cli is the kong-parsed command-line interface.
+type cli struct {
+	Serve serveCmd `cmd:"" help:"Run the local CloudFront data plane from CloudFormation templates."`
+}
 
-Run "localfront serve -h" for the flags of the serve subcommand.
-`
+// serveCmd is the flag set for "localfront serve".
+type serveCmd struct {
+	Templates  []string          `name:"template" required:"" placeholder:"FILE" help:"CloudFormation template file (JSON or YAML); repeatable."`
+	Listen     string            `name:"listen" default:":8080" placeholder:"ADDR" help:"Address for the data plane to listen on."`
+	PublicHost string            `name:"public-host" required:"" env:"LOCALFRONT_PUBLIC_HOST" placeholder:"HOST[:PORT]" help:"Host (optionally host:port) localfront is reached at; canned signed URLs are verified against it verbatim."`
+	S3Endpoint string            `name:"s3-endpoint" placeholder:"URL" help:"Endpoint URL of the S3-compatible object store backing S3 origins."`
+	S3Region   string            `name:"s3-region" default:"us-east-1" placeholder:"REGION" help:"Region used to sign requests to the object store."`
+	S3Access   string            `name:"s3-access-key" placeholder:"KEY" help:"Access key for the object store."`
+	S3Secret   string            `name:"s3-secret-key" placeholder:"KEY" help:"Secret key for the object store."`
+	Parameter  map[string]string `name:"parameter" placeholder:"KEY=VALUE" help:"Template parameter override; repeatable."`
+	KVSSeed    map[string]string `name:"kvs-seed" placeholder:"STORE=FILE" help:"KeyValueStore seed as <store>=<file.json>; repeatable."`
+	LogLevel   string            `name:"log-level" default:"info" enum:"debug,info,warn,error" placeholder:"LEVEL" help:"Log level (debug, info, warn, error)."`
+}
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	os.Exit(run(ctx, os.Args[1:], os.Stderr))
-}
 
-func run(ctx context.Context, args []string, stderr io.Writer) int {
-	if len(args) < 1 {
-		fmt.Fprint(stderr, rootUsage)
-		return 2
-	}
-	switch args[0] {
+	var c cli
+	kctx := kong.Parse(&c,
+		kong.Name("localfront"),
+		kong.Description(rootDescription),
+		kong.UsageOnError(),
+	)
+
+	switch kctx.Command() {
 	case "serve":
-		if err := runServe(ctx, args[1:], stderr); err != nil {
-			if errors.Is(err, flag.ErrHelp) {
-				return 2
-			}
-			fmt.Fprintf(stderr, "localfront: error: %v\n", err)
-			return 1
+		if err := runServe(ctx, &c.Serve, os.Stderr); err != nil {
+			fmt.Fprintf(os.Stderr, "localfront: error: %v\n", err)
+			os.Exit(1)
 		}
-		return 0
-	case "-h", "--help", "help":
-		fmt.Fprint(stderr, rootUsage)
-		return 0
 	default:
-		fmt.Fprintf(stderr, "localfront: unknown subcommand %q\n\n%s", args[0], rootUsage)
-		return 2
+		fmt.Fprintf(os.Stderr, "localfront: unknown command %q\n", kctx.Command())
+		os.Exit(2)
 	}
 }
 
+func runServe(ctx context.Context, c *serveCmd, stderr io.Writer) error {
+	opts := c.toOptions()
+	logger, err := newLogger(stderr, opts.logLevel)
+	if err != nil {
+		return err
+	}
+	slog.SetDefault(logger)
+	return serve(ctx, opts, logger)
+}
+
+// serveOptions is the resolved configuration the serve pipeline and the
+// reloader consume. The kong command struct is mapped onto it so the rest of
+// the package stays decoupled from the parser.
 type serveOptions struct {
 	templates  []string
 	listen     string
+	publicHost string
 	s3Endpoint string
 	s3Region   string
 	s3Access   string
@@ -65,45 +84,36 @@ type serveOptions struct {
 	logLevel   string
 }
 
-func parseServeFlags(args []string, stderr io.Writer) (*serveOptions, error) {
-	opts := &serveOptions{
-		parameters: map[string]string{},
-		kvsSeeds:   map[string]string{},
+func (c *serveCmd) toOptions() *serveOptions {
+	parameters := c.Parameter
+	if parameters == nil {
+		parameters = map[string]string{}
 	}
-	fs := flag.NewFlagSet("localfront serve", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Var((*repeatedString)(&opts.templates), "template", "CloudFormation template file (JSON or YAML); repeatable")
-	fs.StringVar(&opts.listen, "listen", ":8080", "address for the data plane to listen on")
-	fs.StringVar(&opts.s3Endpoint, "s3-endpoint", "", "endpoint URL of the S3-compatible object store backing S3 origins")
-	fs.StringVar(&opts.s3Region, "s3-region", "us-east-1", "region used to sign requests to the object store")
-	fs.StringVar(&opts.s3Access, "s3-access-key", "", "access key for the object store")
-	fs.StringVar(&opts.s3Secret, "s3-secret-key", "", "secret key for the object store")
-	fs.Var(keyValueFlag(opts.parameters), "parameter", "template parameter override as key=value; repeatable")
-	fs.Var(keyValueFlag(opts.kvsSeeds), "kvs-seed", "KeyValueStore seed as <store>=<file.json>; repeatable")
-	fs.StringVar(&opts.logLevel, "log-level", "info", "log level (debug, info, warn, error)")
-	if err := fs.Parse(args); err != nil {
-		return nil, err
+	kvsSeeds := c.KVSSeed
+	if kvsSeeds == nil {
+		kvsSeeds = map[string]string{}
 	}
-	if fs.NArg() > 0 {
-		return nil, fmt.Errorf("unexpected argument %q", fs.Arg(0))
+	return &serveOptions{
+		templates:  c.Templates,
+		listen:     c.Listen,
+		publicHost: c.PublicHost,
+		s3Endpoint: c.S3Endpoint,
+		s3Region:   c.S3Region,
+		s3Access:   c.S3Access,
+		s3Secret:   c.S3Secret,
+		parameters: parameters,
+		kvsSeeds:   kvsSeeds,
+		logLevel:   c.logLevel(),
 	}
-	if len(opts.templates) == 0 {
-		return nil, errors.New("at least one --template is required")
-	}
-	return opts, nil
 }
 
-func runServe(ctx context.Context, args []string, stderr io.Writer) error {
-	opts, err := parseServeFlags(args, stderr)
-	if err != nil {
-		return err
+// logLevel returns the configured log level, defaulting to info when unset
+// (the zero value reached through code paths that bypass kong defaults).
+func (c *serveCmd) logLevel() string {
+	if c.LogLevel == "" {
+		return "info"
 	}
-	logger, err := newLogger(stderr, opts.logLevel)
-	if err != nil {
-		return err
-	}
-	slog.SetDefault(logger)
-	return serve(ctx, opts, logger)
+	return c.LogLevel
 }
 
 func newLogger(w io.Writer, level string) (*slog.Logger, error) {
@@ -112,37 +122,4 @@ func newLogger(w io.Writer, level string) (*slog.Logger, error) {
 		return nil, fmt.Errorf("invalid --log-level %q: must be one of debug, info, warn, error", level)
 	}
 	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: lv})), nil
-}
-
-// repeatedString collects repeated occurrences of a string flag.
-type repeatedString []string
-
-func (r *repeatedString) String() string { return strings.Join(*r, ",") }
-
-func (r *repeatedString) Set(v string) error {
-	*r = append(*r, v)
-	return nil
-}
-
-// keyValueFlag collects repeated key=value flags into a map.
-type keyValueFlag map[string]string
-
-func (m keyValueFlag) String() string {
-	pairs := make([]string, 0, len(m))
-	for k, v := range m {
-		pairs = append(pairs, k+"="+v)
-	}
-	return strings.Join(pairs, ",")
-}
-
-func (m keyValueFlag) Set(v string) error {
-	key, value, ok := strings.Cut(v, "=")
-	if !ok || key == "" {
-		return fmt.Errorf("expected key=value, got %q", v)
-	}
-	if _, dup := m[key]; dup {
-		return fmt.Errorf("duplicate key %q", key)
-	}
-	m[key] = value
-	return nil
 }

@@ -61,7 +61,13 @@ func deny(format string, args ...any) error {
 // trusted keys. It returns nil when access is granted, or a *DenyError.
 // defaultRootObject is the distribution's root object: a request for the root is
 // served (and was signed) as that object, so it is resolved before matching.
-func Verify(r *http.Request, trusted []Key, now time.Time, defaultRootObject string) error {
+//
+// publicHost is the host (optionally host:port) a canned-policy resource was
+// signed for. It is used verbatim — including any port — to reconstruct the
+// resource, because the canned signature covers the exact resource URL the
+// signer produced (this mirrors CloudFront, which compares against the request
+// URL as received). When empty it falls back to the request's Host header.
+func Verify(r *http.Request, trusted []Key, now time.Time, defaultRootObject, publicHost string) error {
 	c, err := extractCredentials(r)
 	if err != nil {
 		return err
@@ -78,7 +84,19 @@ func Verify(r *http.Request, trusted []Key, now time.Time, defaultRootObject str
 	if c.policy != "" {
 		return verifyCustom(r, key, c.policy, sig, now, defaultRootObject)
 	}
-	return verifyCanned(r, key, c.expires, sig, now, defaultRootObject)
+	return verifyCanned(r, key, c.expires, sig, now, defaultRootObject, resourceHost(r, publicHost))
+}
+
+// resourceHost returns the authority used to reconstruct a canned-policy
+// resource. An explicit publicHost (from --public-host) is used verbatim;
+// otherwise the request's Host header is used as received. Either way the port,
+// if present, is part of the resource — the canned signature covers the exact
+// URL the signer produced.
+func resourceHost(r *http.Request, publicHost string) string {
+	if publicHost != "" {
+		return publicHost
+	}
+	return r.Host
 }
 
 // applyDefaultRootObject mirrors the data plane: a request for the distribution
@@ -147,7 +165,7 @@ func findKey(trusted []Key, id string) *rsa.PublicKey {
 // URL (the base URL with its application query string, but without CloudFront's
 // signing parameters), which localfront reconstructs from the request; the
 // viewer side is plain HTTP locally, so both https and http resources are tried.
-func verifyCanned(r *http.Request, key *rsa.PublicKey, expires string, sig []byte, now time.Time, defaultRootObject string) error {
+func verifyCanned(r *http.Request, key *rsa.PublicKey, expires string, sig []byte, now time.Time, defaultRootObject, host string) error {
 	exp, err := strconv.ParseInt(expires, 10, 64)
 	if err != nil {
 		return deny("malformed Expires")
@@ -159,7 +177,7 @@ func verifyCanned(r *http.Request, key *rsa.PublicKey, expires string, sig []byt
 	escapedPath := applyDefaultRootObject(r.URL.EscapedPath(), defaultRootObject)
 	matched := false
 	for _, scheme := range []string{"https", "http"} {
-		resource := scheme + "://" + r.Host + escapedPath
+		resource := scheme + "://" + host + escapedPath
 		if query != "" {
 			resource += "?" + query
 		}
