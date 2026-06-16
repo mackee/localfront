@@ -270,12 +270,15 @@ func startLocalfrontArgs(t *testing.T, args ...string) *localfront {
 	}
 
 	cmd := exec.Command(bin, args...)
-	stdout, err := cmd.StdoutPipe()
+	// printSummary writes to stderr (so stdout is reserved for the CloudFront
+	// Standard access log stream), so read the data plane URL banner from
+	// stderr while still buffering stdout in case a failure dump is needed.
+	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		t.Fatalf("stdout pipe: %v", err)
+		t.Fatalf("stderr pipe: %v", err)
 	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("starting localfront: %v", err)
 	}
@@ -284,13 +287,13 @@ func startLocalfrontArgs(t *testing.T, args ...string) *localfront {
 		_ = cmd.Wait()
 	})
 
-	baseURL := readDataPlaneURL(t, stdout, &stderr)
+	baseURL := readDataPlaneURL(t, stderr, &stdout)
 	lf := &localfront{baseURL: baseURL}
 	lf.waitReady(t)
 	return lf
 }
 
-func readDataPlaneURL(t *testing.T, stdout io.Reader, stderr *bytes.Buffer) string {
+func readDataPlaneURL(t *testing.T, banner io.Reader, otherStream *bytes.Buffer) string {
 	t.Helper()
 	type result struct {
 		url string
@@ -301,7 +304,7 @@ func readDataPlaneURL(t *testing.T, stdout io.Reader, stderr *bytes.Buffer) stri
 		buf := make([]byte, 0, 4096)
 		tmp := make([]byte, 512)
 		for {
-			n, err := stdout.Read(tmp)
+			n, err := banner.Read(tmp)
 			buf = append(buf, tmp[:n]...)
 			if m := dataPlaneLine.FindSubmatch(buf); m != nil {
 				ch <- result{url: string(m[1])}
@@ -316,11 +319,11 @@ func readDataPlaneURL(t *testing.T, stdout io.Reader, stderr *bytes.Buffer) stri
 	select {
 	case r := <-ch:
 		if r.err != nil {
-			t.Fatalf("localfront exited before serving: %v\nstderr:\n%s", r.err, stderr.String())
+			t.Fatalf("localfront exited before serving: %v\nstdout:\n%s", r.err, otherStream.String())
 		}
 		return r.url
 	case <-time.After(15 * time.Second):
-		t.Fatalf("localfront did not print its data plane URL\nstderr:\n%s", stderr.String())
+		t.Fatalf("localfront did not print its data plane URL\nstdout:\n%s", otherStream.String())
 		return ""
 	}
 }

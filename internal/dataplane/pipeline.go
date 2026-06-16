@@ -70,6 +70,11 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, dist *config.Dist
 			return // a 503 was already written
 		}
 		resp = shortCircuit
+		if resp != nil {
+			if rec, ok := w.(*accessRecorder); ok {
+				rec.markFunctionGenerated()
+			}
+		}
 	}
 
 	if resp == nil {
