@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"strings"
 	"sync/atomic"
+	"time"
 
+	"github.com/mackee/localfront/internal/accesslog"
 	"github.com/mackee/localfront/internal/behavior"
 	"github.com/mackee/localfront/internal/cffunc"
 	"github.com/mackee/localfront/internal/config"
@@ -29,6 +31,9 @@ type Server struct {
 	// for, used verbatim to verify canned-policy signatures. Empty means: use
 	// the viewer's Host header as received (see sign.Verify).
 	publicHost string
+	// accessLog emits one CloudFront Standard log line per completed request.
+	// Nil disables access logging; the wrapping in ServeHTTP becomes a no-op.
+	accessLog *accesslog.Writer
 }
 
 // snapshot is the swappable per-config state: host routing, the compiled
@@ -69,6 +74,12 @@ func WithS3Fetcher(f origin.Fetcher) Option {
 // it empty to derive the host from each request's Host header as received.
 func WithPublicHost(host string) Option {
 	return func(s *Server) { s.publicHost = host }
+}
+
+// WithAccessLog directs per-request access logs (CloudFront Standard format)
+// at the given writer. Pass nil to disable logging.
+func WithAccessLog(w *accesslog.Writer) Option {
+	return func(s *Server) { s.accessLog = w }
 }
 
 // New returns a Server serving cfg.
@@ -161,6 +172,14 @@ func (t *routeTable) match(host string) *config.Distribution {
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	requestID := newRequestID()
+	start := time.Now()
+	var rec *accessRecorder
+	if s.accessLog != nil {
+		rec = newAccessRecorder(w, start, r.Proto)
+		rec.wrapRequestBody(r)
+		w = rec
+	}
+
 	host := hostOnly(r.Host)
 	snap := s.snap.Load()
 	dist := snap.routes.match(host)
@@ -168,6 +187,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.logger.Info("no distribution matches host", "host", host)
 		writeCFError(w, http.StatusForbidden, requestID,
 			"The request could not be satisfied: no distribution matches the Host header.")
+		s.emitAccessLog(r, rec, nil, requestID)
 		return
 	}
 
@@ -180,10 +200,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.logger.Info("method not allowed by behavior", "method", r.Method, "distribution", dist.LogicalID)
 		writeCFError(w, http.StatusForbidden, requestID,
 			"This distribution is not configured to allow the HTTP request method that was used for this request.")
+		s.emitAccessLog(r, rec, dist, requestID)
 		return
 	}
 
 	s.serve(w, r, dist, beh, snap, requestID)
+	s.emitAccessLog(r, rec, dist, requestID)
 }
 
 func hostOnly(hostport string) string {

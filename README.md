@@ -100,6 +100,8 @@ distribution E... [AssetsDistribution]
 
 Repeatable flags: `--template`, `--parameter KEY=VALUE` (overrides template parameter defaults), and `--kvs-seed STORE=FILE` (substitutes a local JSON for a KeyValueStore's `ImportSource`). `--listen` defaults to `:8080`; `--log-level` accepts `debug|info|warn|error`. `--public-host` is required (env: `LOCALFRONT_PUBLIC_HOST`).
 
+`--access-log FILE` (env: `LOCALFRONT_ACCESS_LOG`) writes per-request access logs in CloudFront's Standard log format — 33 tab-separated columns with the `#Version:` / `#Fields:` preamble — so the same ETL that consumes the S3-delivered logs in production also consumes the file localfront produces. Default is `-` (stdout); pass an empty string (`--access-log ''` or `LOCALFRONT_ACCESS_LOG=''`) to disable. The startup banner and operational slog output go to stderr, leaving stdout clean for log consumers.
+
 ### Container image (GHCR)
 
 Pre-built images are published to `ghcr.io/mackee/localfront` (linux/amd64 + linux/arm64) on every release tag. The image is `gcr.io/distroless/static-debian12:nonroot`-based — about 16 MB, no shell or package manager. Every flag is also reachable as `LOCALFRONT_*`, so the binary can be fully configured by environment:
@@ -199,5 +201,5 @@ $ curl -H 'Host: assets.example.test' http://localhost:8080/
 - `localfront test-function` — run a CloudFront Function against a synthetic event from the CLI
 - Origin group failover
 - TLS termination with locally trusted certificates
-- Standard access log output (CloudFront log format)
+- Real-time logs (Kinesis-shaped variant of CloudFront's log delivery; Standard logs are already supported via `--access-log`)
 - Geo restriction enforcement and viewer profile presets (country / device simulation)

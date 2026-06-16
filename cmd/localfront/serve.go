@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"time"
 
+	"github.com/mackee/localfront/internal/accesslog"
 	"github.com/mackee/localfront/internal/cfntmpl"
 	"github.com/mackee/localfront/internal/config"
 	"github.com/mackee/localfront/internal/dataplane"
@@ -25,6 +27,22 @@ func serve(ctx context.Context, opts *serveOptions, logger *slog.Logger) error {
 
 	dpOpts := []dataplane.Option{dataplane.WithPublicHost(opts.publicHost)}
 	logger.Info("verifying canned signed URLs against the public host", "host", opts.publicHost)
+
+	accessLogCloser, accessLogWriter, err := openAccessLog(opts.accessLog)
+	if err != nil {
+		return err
+	}
+	if accessLogCloser != nil {
+		defer func() {
+			if cerr := accessLogCloser.Close(); cerr != nil {
+				logger.Warn("closing access log", "error", cerr)
+			}
+		}()
+	}
+	if accessLogWriter != nil {
+		dpOpts = append(dpOpts, dataplane.WithAccessLog(accessLogWriter))
+		logger.Info("access log enabled", "destination", opts.accessLog)
+	}
 	var s3Client origin.Fetcher
 	if opts.s3Endpoint != "" {
 		client, err := origin.NewS3Client(opts.s3Endpoint, opts.s3Region, opts.s3Access, opts.s3Secret, nil)
@@ -126,19 +144,23 @@ func watchFiles(ctx context.Context, opts *serveOptions, rl *reloader, logger *s
 	}
 }
 
+// printSummary writes the startup banner to stderr. The access log occupies
+// stdout when enabled (the default), so keeping the banner off stdout means
+// downstream consumers can pipe access logs straight into ETL without first
+// stripping the banner lines.
 func printSummary(listener net.Listener, opts *serveOptions, cfg *config.Config) {
-	fmt.Printf("data plane   http://%s\n", displayAddr(listener.Addr().String()))
+	fmt.Fprintf(os.Stderr, "data plane   http://%s\n", displayAddr(listener.Addr().String()))
 	for _, t := range opts.templates {
-		fmt.Printf("template     %s (hot reload)\n", t)
+		fmt.Fprintf(os.Stderr, "template     %s (hot reload)\n", t)
 	}
 	for _, d := range cfg.Distributions {
 		status := ""
 		if !d.Enabled {
 			status = " (disabled)"
 		}
-		fmt.Printf("distribution %s [%s]%s\n", d.ID, d.LogicalID, status)
+		fmt.Fprintf(os.Stderr, "distribution %s [%s]%s\n", d.ID, d.LogicalID, status)
 		for _, host := range d.Hostnames() {
-			fmt.Printf("  http://%s -> %s\n", host, displayAddr(listener.Addr().String()))
+			fmt.Fprintf(os.Stderr, "  http://%s -> %s\n", host, displayAddr(listener.Addr().String()))
 		}
 	}
 }
@@ -178,6 +200,35 @@ func configUsesKVSImportSource(cfg *config.Config, seeds map[string]string) bool
 		return true
 	}
 	return false
+}
+
+// openAccessLog resolves the --access-log destination into a writer suitable
+// for accesslog.NewWriter. An empty path returns (nil, nil, nil), meaning
+// access logging stays disabled. "-" or "stdout" send the log to os.Stdout,
+// keeping it separate from the slog operational stream on stderr. Any other
+// path is opened append-only, creating the file if necessary; the caller is
+// responsible for closing the io.Closer when the server stops.
+func openAccessLog(path string) (io.Closer, *accesslog.Writer, error) {
+	if path == "" {
+		return nil, nil, nil
+	}
+	if path == "-" || path == "stdout" {
+		w, err := accesslog.NewWriter(os.Stdout)
+		if err != nil {
+			return nil, nil, fmt.Errorf("initializing access log on stdout: %w", err)
+		}
+		return nil, w, nil
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, nil, fmt.Errorf("opening access log %s: %w", path, err)
+	}
+	w, err := accesslog.NewWriter(f)
+	if err != nil {
+		_ = f.Close()
+		return nil, nil, fmt.Errorf("initializing access log %s: %w", path, err)
+	}
+	return f, w, nil
 }
 
 // displayAddr turns a listener address into something clickable.

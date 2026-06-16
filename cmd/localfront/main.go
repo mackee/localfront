@@ -43,6 +43,7 @@ type serveCmd struct {
 	Parameter  map[string]string `name:"parameter" env:"LOCALFRONT_PARAMETER" placeholder:"KEY=VALUE" help:"Template parameter override; repeatable. Env: comma-separated KEY=VALUE pairs."`
 	KVSSeed    map[string]string `name:"kvs-seed" env:"LOCALFRONT_KVS_SEED" placeholder:"STORE=FILE" help:"KeyValueStore seed as <store>=<file.json>; repeatable. Env: comma-separated STORE=FILE pairs."`
 	LogLevel   string            `name:"log-level" default:"info" env:"LOCALFRONT_LOG_LEVEL" enum:"debug,info,warn,error" placeholder:"LEVEL" help:"Log level (debug, info, warn, error)."`
+	AccessLog  string            `name:"access-log" default:"-" env:"LOCALFRONT_ACCESS_LOG" placeholder:"FILE" help:"Write CloudFront Standard-format access logs to FILE; '-' (default) or 'stdout' streams them on stdout. Pass an empty string to disable."`
 }
 
 func main() {
@@ -93,6 +94,7 @@ type serveOptions struct {
 	parameters map[string]string
 	kvsSeeds   map[string]string
 	logLevel   string
+	accessLog  string
 }
 
 func (c *serveCmd) toOptions() *serveOptions {
@@ -115,6 +117,7 @@ func (c *serveCmd) toOptions() *serveOptions {
 		parameters: parameters,
 		kvsSeeds:   kvsSeeds,
 		logLevel:   c.logLevel(),
+		accessLog:  c.AccessLog,
 	}
 }
 
