@@ -16,9 +16,15 @@ import (
 
 const rootDescription = "localfront is a local Amazon CloudFront emulator driven by CloudFormation templates."
 
+// version is the build identifier. It is "dev" for `go build` / `go install`
+// and is overridden via -ldflags="-X main.version=..." in release builds
+// (see Dockerfile and .github/workflows/release.yml).
+var version = "dev"
+
 // cli is the kong-parsed command-line interface.
 type cli struct {
-	Serve serveCmd `cmd:"" help:"Run the local CloudFront data plane from CloudFormation templates."`
+	Serve   serveCmd         `cmd:"" help:"Run the local CloudFront data plane from CloudFormation templates."`
+	Version kong.VersionFlag `name:"version" short:"V" help:"Print the localfront version and exit."`
 }
 
 // serveCmd is the flag set for "localfront serve". Every flag also accepts a
@@ -48,6 +54,7 @@ func main() {
 		kong.Name("localfront"),
 		kong.Description(rootDescription),
 		kong.UsageOnError(),
+		kong.Vars{"version": version},
 	)
 
 	switch kctx.Command() {
