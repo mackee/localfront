@@ -1,15 +1,51 @@
 package watch
 
 import (
-	"context"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sync/atomic"
+	"strconv"
 	"testing"
 	"time"
 )
+
+// syncWatcherReady mutates the watched file until the callback fires, proving
+// that fsnotify finished registering. Without it the test could write its
+// real probe before Watch reaches its event loop and miss the event. The
+// per-attempt wait is longer than the debounce window so a single write is
+// not coalesced away by a subsequent retry.
+func syncWatcherReady(t *testing.T, file string, fired <-chan struct{}) {
+	t.Helper()
+	const perAttempt = debounceInterval + 100*time.Millisecond
+	const maxWait = 5 * time.Second
+	attempts := int(maxWait / perAttempt)
+	for i := range attempts {
+		if err := os.WriteFile(file, []byte("sync-"+strconv.Itoa(i)), 0o600); err != nil {
+			t.Fatalf("sync write: %v", err)
+		}
+		select {
+		case <-fired:
+			drainFires(fired)
+			return
+		case <-time.After(perAttempt):
+			// no fire yet — try another write
+		}
+	}
+	t.Fatal("watcher never confirmed registration within deadline")
+}
+
+// drainFires consumes any debounced fires the sync writes produced, so the
+// test's actual probe starts from an empty channel.
+func drainFires(fired <-chan struct{}) {
+	for {
+		select {
+		case <-fired:
+		case <-time.After(2 * debounceInterval):
+			return
+		}
+	}
+}
 
 func TestWatch_FiresOnChange(t *testing.T) {
 	dir := t.TempDir()
@@ -18,15 +54,10 @@ func TestWatch_FiresOnChange(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	var count atomic.Int32
 	fired := make(chan struct{}, 8)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	go func() {
-		_ = Watch(ctx, []string{file}, logger, func() {
-			count.Add(1)
+		_ = Watch(t.Context(), []string{file}, logger, func() {
 			select {
 			case fired <- struct{}{}:
 			default:
@@ -34,12 +65,11 @@ func TestWatch_FiresOnChange(t *testing.T) {
 		})
 	}()
 
-	// Give the watcher time to register before mutating the file.
-	time.Sleep(100 * time.Millisecond)
+	syncWatcherReady(t, file, fired)
+
 	if err := os.WriteFile(file, []byte("changed"), 0o600); err != nil {
 		t.Fatalf("rewrite: %v", err)
 	}
-
 	select {
 	case <-fired:
 	case <-time.After(5 * time.Second):
@@ -57,21 +87,28 @@ func TestWatch_IgnoresUnwatchedFiles(t *testing.T) {
 		}
 	}
 
-	var count atomic.Int32
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	fired := make(chan struct{}, 8)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	go func() {
-		_ = Watch(ctx, []string{watched}, logger, func() { count.Add(1) })
+		_ = Watch(t.Context(), []string{watched}, logger, func() {
+			select {
+			case fired <- struct{}{}:
+			default:
+			}
+		})
 	}()
-	time.Sleep(100 * time.Millisecond)
+
+	syncWatcherReady(t, watched, fired)
 
 	// Touching an unwatched file in the same directory must not fire.
 	if err := os.WriteFile(other, []byte("y"), 0o600); err != nil {
 		t.Fatalf("rewrite other: %v", err)
 	}
-	time.Sleep(600 * time.Millisecond)
-	if n := count.Load(); n != 0 {
-		t.Errorf("onChange fired %d times for an unwatched file, want 0", n)
+	// Wait the debounce window plus slack — any fire that was going to happen
+	// would have arrived by now.
+	select {
+	case <-fired:
+		t.Error("onChange fired for an unwatched file, want no fire")
+	case <-time.After(2 * debounceInterval):
 	}
 }
