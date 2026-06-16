@@ -66,68 +66,95 @@ func responseHeadersPolicyFromProps(id string, p *responseHeadersPolicyConfigPro
 	if p == nil {
 		return nil, fmt.Errorf("ResponseHeadersPolicyConfig is required")
 	}
-	rhp := &ResponseHeadersPolicy{ID: id, Name: p.Name}
-	if c := p.CorsConfig; c != nil {
-		rhp.Cors = &CorsConfig{
-			AllowCredentials: c.AccessControlAllowCredentials.Value(false),
-			AllowHeaders:     c.AccessControlAllowHeaders,
-			AllowMethods:     c.AccessControlAllowMethods,
-			AllowOrigins:     c.AccessControlAllowOrigins,
-			ExposeHeaders:    c.AccessControlExposeHeaders,
-			OriginOverride:   c.OriginOverride.Value(false),
-		}
-		if c.AccessControlMaxAgeSec != nil {
-			rhp.Cors.MaxAgeSec = c.AccessControlMaxAgeSec.Value(0)
-			rhp.Cors.HasMaxAge = true
+	return &ResponseHeadersPolicy{
+		ID:            id,
+		Name:          p.Name,
+		Cors:          corsFromProps(p.CorsConfig),
+		CustomHeaders: customHeadersFromProps(p.CustomHeadersConfig),
+		RemoveHeaders: removeHeadersFromProps(p.RemoveHeadersConfig),
+		Security:      securityHeadersFromProps(p.SecurityHeadersConfig),
+	}, nil
+}
+
+func corsFromProps(c *corsConfigProps) *CorsConfig {
+	if c == nil {
+		return nil
+	}
+	cors := &CorsConfig{
+		AllowCredentials: c.AccessControlAllowCredentials.Value(false),
+		AllowHeaders:     c.AccessControlAllowHeaders,
+		AllowMethods:     c.AccessControlAllowMethods,
+		AllowOrigins:     c.AccessControlAllowOrigins,
+		ExposeHeaders:    c.AccessControlExposeHeaders,
+		OriginOverride:   c.OriginOverride.Value(false),
+	}
+	if c.AccessControlMaxAgeSec != nil {
+		cors.MaxAgeSec = c.AccessControlMaxAgeSec.Value(0)
+		cors.HasMaxAge = true
+	}
+	return cors
+}
+
+func customHeadersFromProps(c *customHeadersConfigProps) []CustomHeader {
+	if c == nil {
+		return nil
+	}
+	out := make([]CustomHeader, 0, len(c.Items))
+	for _, h := range c.Items {
+		out = append(out, CustomHeader{
+			Name:     h.Header,
+			Value:    h.Value,
+			Override: h.Override.Value(false),
+		})
+	}
+	return out
+}
+
+func removeHeadersFromProps(c *removeHeadersConfigProps) []string {
+	if c == nil {
+		return nil
+	}
+	out := make([]string, 0, len(c.Items))
+	for _, h := range c.Items {
+		out = append(out, h.Header)
+	}
+	return out
+}
+
+func securityHeadersFromProps(c *securityHeadersConfigProps) *SecurityHeaders {
+	if c == nil {
+		return nil
+	}
+	sec := &SecurityHeaders{}
+	if v := c.ContentSecurityPolicy; v != nil {
+		sec.ContentSecurityPolicy = &HeaderValue{Value: v.ContentSecurityPolicy, Override: v.Override.Value(false)}
+	}
+	if v := c.ContentTypeOptions; v != nil {
+		sec.ContentTypeOptions = &HeaderToggle{Override: v.Override.Value(false)}
+	}
+	if v := c.FrameOptions; v != nil {
+		sec.FrameOptions = &HeaderValue{Value: v.FrameOption, Override: v.Override.Value(false)}
+	}
+	if v := c.ReferrerPolicy; v != nil {
+		sec.ReferrerPolicy = &HeaderValue{Value: v.ReferrerPolicy, Override: v.Override.Value(false)}
+	}
+	if v := c.StrictTransportSecurity; v != nil {
+		sec.StrictTransportSecurity = &HSTS{
+			MaxAgeSec:         v.AccessControlMaxAgeSec.Value(0),
+			IncludeSubdomains: v.IncludeSubdomains.Value(false),
+			Preload:           v.Preload.Value(false),
+			Override:          v.Override.Value(false),
 		}
 	}
-	if c := p.CustomHeadersConfig; c != nil {
-		for _, h := range c.Items {
-			rhp.CustomHeaders = append(rhp.CustomHeaders, CustomHeader{
-				Name:     h.Header,
-				Value:    h.Value,
-				Override: h.Override.Value(false),
-			})
+	if v := c.XSSProtection; v != nil {
+		sec.XSSProtection = &XSSProtection{
+			Protection: v.Protection.Value(false),
+			ModeBlock:  v.ModeBlock.Value(false),
+			ReportURI:  v.ReportUri,
+			Override:   v.Override.Value(false),
 		}
 	}
-	if c := p.RemoveHeadersConfig; c != nil {
-		for _, h := range c.Items {
-			rhp.RemoveHeaders = append(rhp.RemoveHeaders, h.Header)
-		}
-	}
-	if c := p.SecurityHeadersConfig; c != nil {
-		sec := &SecurityHeaders{}
-		if v := c.ContentSecurityPolicy; v != nil {
-			sec.ContentSecurityPolicy = &HeaderValue{Value: v.ContentSecurityPolicy, Override: v.Override.Value(false)}
-		}
-		if v := c.ContentTypeOptions; v != nil {
-			sec.ContentTypeOptions = &HeaderToggle{Override: v.Override.Value(false)}
-		}
-		if v := c.FrameOptions; v != nil {
-			sec.FrameOptions = &HeaderValue{Value: v.FrameOption, Override: v.Override.Value(false)}
-		}
-		if v := c.ReferrerPolicy; v != nil {
-			sec.ReferrerPolicy = &HeaderValue{Value: v.ReferrerPolicy, Override: v.Override.Value(false)}
-		}
-		if v := c.StrictTransportSecurity; v != nil {
-			sec.StrictTransportSecurity = &HSTS{
-				MaxAgeSec:         v.AccessControlMaxAgeSec.Value(0),
-				IncludeSubdomains: v.IncludeSubdomains.Value(false),
-				Preload:           v.Preload.Value(false),
-				Override:          v.Override.Value(false),
-			}
-		}
-		if v := c.XSSProtection; v != nil {
-			sec.XSSProtection = &XSSProtection{
-				Protection: v.Protection.Value(false),
-				ModeBlock:  v.ModeBlock.Value(false),
-				ReportURI:  v.ReportUri,
-				Override:   v.Override.Value(false),
-			}
-		}
-		rhp.Security = sec
-	}
-	return rhp, nil
+	return sec
 }
 
 // cachePolicyFromForwardedValues converts a legacy ForwardedValues block (plus
