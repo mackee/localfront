@@ -40,7 +40,7 @@ jobs:
           go-version-file: go.mod
       # Install the dev tools from aqua.yaml (task, runn) so the runn example
       # scenarios run instead of skipping.
-      - uses: aquaproj/aqua-installer@e2d0136abcf70b7a2f6f505720640750557c4b33 # v3.1.1
+      - uses: aquaproj/aqua-installer@f6be09d5313d3af86e3ad665911c67b149a4498c # v4.0.4
         with:
           aqua_version: v2.56.1
       # Docker is preinstalled on ubuntu-latest runners; the Go e2e suite drives
