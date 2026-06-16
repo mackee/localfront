@@ -76,13 +76,15 @@ func TestM4_PathRoutingAcrossOrigins(t *testing.T) {
 		{"/api", "static:/api"}, // /api alone does not match /api/*
 	}
 	for _, tc := range tests {
-		req := httptest.NewRequest(http.MethodGet, "http://site.example.test"+tc.path, nil)
-		req.Host = "site.example.test"
-		rr := httptest.NewRecorder()
-		srv.ServeHTTP(rr, req)
-		if got := rr.Body.String(); got != tc.want {
-			t.Errorf("path %q served %q, want %q", tc.path, got, tc.want)
-		}
+		t.Run(tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "http://site.example.test"+tc.path, nil)
+			req.Host = "site.example.test"
+			rr := httptest.NewRecorder()
+			srv.ServeHTTP(rr, req)
+			if got := rr.Body.String(); got != tc.want {
+				t.Errorf("path %q served %q, want %q", tc.path, got, tc.want)
+			}
+		})
 	}
 }
 

@@ -1,6 +1,7 @@
 package behavior
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -49,9 +50,12 @@ func TestMatchPath(t *testing.T) {
 		{"/robots.txt", "/robots.txt/extra", false},
 	}
 	for _, tc := range tests {
-		if got := MatchPath(tc.pattern, tc.path); got != tc.want {
-			t.Errorf("MatchPath(%q, %q) = %v, want %v", tc.pattern, tc.path, got, tc.want)
-		}
+		name := fmt.Sprintf("%s_vs_%s", tc.pattern, tc.path)
+		t.Run(name, func(t *testing.T) {
+			if got := MatchPath(tc.pattern, tc.path); got != tc.want {
+				t.Errorf("MatchPath(%q, %q) = %v, want %v", tc.pattern, tc.path, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -78,9 +82,11 @@ func TestSelect_FirstMatchWins(t *testing.T) {
 		{"/", def},                   //
 	}
 	for _, tc := range tests {
-		if got := Select(dist, tc.path); got != tc.want {
-			t.Errorf("Select(%q) = %q, want %q", tc.path, got.PathPattern, tc.want.PathPattern)
-		}
+		t.Run(tc.path, func(t *testing.T) {
+			if got := Select(dist, tc.path); got != tc.want {
+				t.Errorf("Select(%q) = %q, want %q", tc.path, got.PathPattern, tc.want.PathPattern)
+			}
+		})
 	}
 }
 
