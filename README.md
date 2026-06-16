@@ -87,13 +87,18 @@ The PoC **does not cache**. Cache policies are still interpreted — they determ
 $ docker run -d -p 9000:9000 rustfs/rustfs        # S3-compatible origin storage
 $ go install github.com/mackee/localfront/cmd/localfront@latest
 $ localfront serve --template ./template.yaml \
+    --listen        :8080 \
     --public-host   assets.example.test:8080 \
     --s3-endpoint   http://localhost:9000 \
     --s3-access-key rustfsadmin \
     --s3-secret-key rustfsadmin
 data plane   http://localhost:8080
-watching     ./template.yaml (hot reload)
+template     ./template.yaml (hot reload)
+distribution E... [AssetsDistribution]
+  http://assets.example.test -> localhost:8080
 ```
+
+Repeatable flags: `--template`, `--parameter KEY=VALUE` (overrides template parameter defaults), and `--kvs-seed STORE=FILE` (substitutes a local JSON for a KeyValueStore's `ImportSource`). `--listen` defaults to `:8080`; `--log-level` accepts `debug|info|warn|error`. `--public-host` is required (env: `LOCALFRONT_PUBLIC_HOST`).
 
 ### Example template
 
