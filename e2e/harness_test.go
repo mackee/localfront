@@ -191,11 +191,16 @@ func (s *store) put(t *testing.T, bucket, key, contentType string, body []byte) 
 	sum := sha256.Sum256(body)
 	payloadHash := hex.EncodeToString(sum[:])
 
-	// Retry on 503: the store can report ready on ListBuckets a moment before
-	// it accepts writes.
+	// Retry on 503 with exponential backoff: the store can report ready on
+	// ListBuckets a moment before it accepts writes. Cap the total wait so a
+	// genuine misconfiguration still fails fast.
 	var lastStatus int
 	var lastMsg []byte
-	for attempt := 0; attempt < 10; attempt++ {
+	const maxAttempts = 10
+	const maxWait = 10 * time.Second
+	backoff := 100 * time.Millisecond
+	deadline := time.Now().Add(maxWait)
+	for attempt := range maxAttempts {
 		send := req.Clone(context.Background())
 		send.ContentLength = int64(len(body))
 		if len(body) == 0 {
@@ -221,7 +226,13 @@ func (s *store) put(t *testing.T, bucket, key, contentType string, body []byte) 
 		if resp.StatusCode != http.StatusServiceUnavailable {
 			break
 		}
-		time.Sleep(500 * time.Millisecond)
+		if attempt == maxAttempts-1 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(backoff)
+		if backoff < time.Second {
+			backoff *= 2
+		}
 	}
 	t.Fatalf("PUT %s returned %d: %s", u, lastStatus, lastMsg)
 }
@@ -349,8 +360,20 @@ func (lf *localfront) get(t *testing.T, method, host, path string, headers map[s
 var (
 	buildOnce sync.Once
 	builtBin  string
+	builtDir  string
 	buildErr  error
 )
+
+// TestMain runs the e2e suite and cleans up the once-built binary directory.
+// Using TestMain rather than t.Cleanup is required because the binary is
+// shared across tests via sync.Once.
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if builtDir != "" {
+		_ = os.RemoveAll(builtDir)
+	}
+	os.Exit(code)
+}
 
 // buildBinary builds the localfront binary once per test run and caches it.
 func buildBinary(t *testing.T) string {
@@ -364,9 +387,11 @@ func buildBinary(t *testing.T) string {
 		bin := filepath.Join(dir, "localfront")
 		cmd := exec.Command("go", "build", "-o", bin, "github.com/mackee/localfront/cmd/localfront")
 		if out, err := cmd.CombinedOutput(); err != nil {
+			_ = os.RemoveAll(dir)
 			buildErr = fmt.Errorf("building localfront: %v\n%s", err, out)
 			return
 		}
+		builtDir = dir
 		builtBin = bin
 	})
 	if buildErr != nil {
