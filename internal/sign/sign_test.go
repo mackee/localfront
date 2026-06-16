@@ -5,9 +5,10 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"sync"
+	"os"
 	"testing"
 	"time"
 
@@ -17,32 +18,46 @@ import (
 
 const keyPairID = "K2EXAMPLEKEYID"
 
+// testPriv and testTrusted are populated once by TestMain. Tests read them
+// without further synchronization: TestMain establishes a happens-before
+// relationship before any TestX runs, so concurrent t.Parallel reads are
+// safe even though the values themselves are package-level.
 var (
-	testKeyOnce sync.Once
 	testPriv    *rsa.PrivateKey
 	testTrusted []sign.Key
 )
 
-// testKey lazily generates an RSA key pair and the matching trusted Key list.
+func TestMain(m *testing.M) {
+	priv, trusted, err := generateTestKey()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "sign_test: generating RSA test key: %v\n", err)
+		os.Exit(1)
+	}
+	testPriv = priv
+	testTrusted = trusted
+	os.Exit(m.Run())
+}
+
+func generateTestKey() (*rsa.PrivateKey, []sign.Key, error) {
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate key: %w", err)
+	}
+	der, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshal public key: %w", err)
+	}
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})
+	pub, err := sign.ParsePublicKey(string(pemBytes))
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse public key: %w", err)
+	}
+	return priv, []sign.Key{{ID: keyPairID, RSA: pub}}, nil
+}
+
+// testKey returns the package-wide test key pair and trusted-key list.
 func testKey(t *testing.T) (*rsa.PrivateKey, []sign.Key) {
 	t.Helper()
-	testKeyOnce.Do(func() {
-		priv, err := rsa.GenerateKey(rand.Reader, 2048)
-		if err != nil {
-			t.Fatalf("generate key: %v", err)
-		}
-		der, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
-		if err != nil {
-			t.Fatalf("marshal public key: %v", err)
-		}
-		pemBytes := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})
-		pub, err := sign.ParsePublicKey(string(pemBytes))
-		if err != nil {
-			t.Fatalf("parse public key: %v", err)
-		}
-		testPriv = priv
-		testTrusted = []sign.Key{{ID: keyPairID, RSA: pub}}
-	})
 	return testPriv, testTrusted
 }
 
