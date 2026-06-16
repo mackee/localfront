@@ -3,6 +3,7 @@ package dataplane
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"html"
 	"io"
@@ -10,17 +11,24 @@ import (
 	"net/http"
 	"net/textproto"
 	"strings"
+	"sync/atomic"
+	"time"
 )
 
 // popName is the fake point-of-presence reported in X-Amz-Cf-Pop.
 const popName = "LOCAL50-C1"
 
+var requestIDSeq atomic.Uint64
+
 // newRequestID generates an X-Amz-Cf-Id-shaped request ID
-// (56 base64 characters, like CloudFront's).
+// (56 base64 characters, like CloudFront's). If crypto/rand fails — which
+// should not happen on supported platforms — a time+counter fallback keeps
+// the request flowing rather than panicking inside the HTTP handler.
 func newRequestID() string {
 	b := make([]byte, 42)
 	if _, err := rand.Read(b); err != nil {
-		panic(err) // crypto/rand never fails on supported platforms
+		binary.BigEndian.PutUint64(b[0:8], uint64(time.Now().UnixNano()))
+		binary.BigEndian.PutUint64(b[8:16], requestIDSeq.Add(1))
 	}
 	return base64.StdEncoding.EncodeToString(b)
 }
