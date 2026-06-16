@@ -28,6 +28,8 @@ type reloader struct {
 
 	mu           sync.Mutex
 	currentFuncs map[string]*cffunc.Function
+	pendingTimer *time.Timer
+	pendingFuncs map[string]*cffunc.Function
 }
 
 // reload loads the templates, recompiles the functions, and swaps both into the
@@ -43,14 +45,37 @@ func (rl *reloader) reload() error {
 	}
 
 	rl.mu.Lock()
+	// A still-pending grace period for an earlier generation is collapsed now:
+	// stopping the timer and closing those functions before scheduling the new
+	// grace period keeps a single delayed-close goroutine in flight and avoids
+	// any chance of double-closing the same Function on shutdown.
+	prevTimer, prevFuncs := rl.pendingTimer, rl.pendingFuncs
 	old := rl.currentFuncs
 	rl.currentFuncs = funcs
+	rl.pendingTimer = nil
+	rl.pendingFuncs = nil
+	if len(old) > 0 {
+		captured := old
+		rl.pendingFuncs = captured
+		rl.pendingTimer = time.AfterFunc(funcCloseGrace, func() {
+			rl.mu.Lock()
+			if rl.pendingFuncs == nil {
+				rl.mu.Unlock()
+				return
+			}
+			toClose := rl.pendingFuncs
+			rl.pendingFuncs = nil
+			rl.pendingTimer = nil
+			rl.mu.Unlock()
+			closeFunctions(toClose)
+		})
+	}
 	rl.mu.Unlock()
 
 	rl.server.Swap(cfg, funcs)
 
-	if len(old) > 0 {
-		time.AfterFunc(funcCloseGrace, func() { closeFunctions(old) })
+	if prevTimer != nil && prevTimer.Stop() {
+		closeFunctions(prevFuncs)
 	}
 	return nil
 }
@@ -58,8 +83,16 @@ func (rl *reloader) reload() error {
 // closeCurrent releases the live functions, for shutdown.
 func (rl *reloader) closeCurrent() {
 	rl.mu.Lock()
+	timer := rl.pendingTimer
+	pending := rl.pendingFuncs
 	funcs := rl.currentFuncs
 	rl.currentFuncs = nil
+	rl.pendingTimer = nil
+	rl.pendingFuncs = nil
 	rl.mu.Unlock()
+
+	if timer != nil && timer.Stop() {
+		closeFunctions(pending)
+	}
 	closeFunctions(funcs)
 }
