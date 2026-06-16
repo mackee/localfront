@@ -16,23 +16,33 @@ import (
 
 const rootDescription = "localfront is a local Amazon CloudFront emulator driven by CloudFormation templates."
 
+// version is the build identifier. It is "dev" for `go build` / `go install`
+// and is overridden via -ldflags="-X main.version=..." in release builds
+// (see Dockerfile and .github/workflows/release.yml).
+var version = "dev"
+
 // cli is the kong-parsed command-line interface.
 type cli struct {
-	Serve serveCmd `cmd:"" help:"Run the local CloudFront data plane from CloudFormation templates."`
+	Serve   serveCmd         `cmd:"" help:"Run the local CloudFront data plane from CloudFormation templates."`
+	Version kong.VersionFlag `name:"version" short:"V" help:"Print the localfront version and exit."`
 }
 
-// serveCmd is the flag set for "localfront serve".
+// serveCmd is the flag set for "localfront serve". Every flag also accepts a
+// LOCALFRONT_* environment variable so the binary can be fully configured for
+// container deployments without an entrypoint wrapper. Repeatable flags
+// (template, parameter, kvs-seed) use comma-separated entries when set via
+// env (kong's default mapper splits on commas, and map entries are KEY=VALUE).
 type serveCmd struct {
-	Templates  []string          `name:"template" required:"" placeholder:"FILE" help:"CloudFormation template file (JSON or YAML); repeatable."`
-	Listen     string            `name:"listen" default:":8080" placeholder:"ADDR" help:"Address for the data plane to listen on."`
+	Templates  []string          `name:"template" required:"" env:"LOCALFRONT_TEMPLATE" placeholder:"FILE" help:"CloudFormation template file (JSON or YAML); repeatable. Env: comma-separated list."`
+	Listen     string            `name:"listen" default:":8080" env:"LOCALFRONT_LISTEN" placeholder:"ADDR" help:"Address for the data plane to listen on."`
 	PublicHost string            `name:"public-host" required:"" env:"LOCALFRONT_PUBLIC_HOST" placeholder:"HOST[:PORT]" help:"Host (optionally host:port) localfront is reached at; canned signed URLs are verified against it verbatim."`
-	S3Endpoint string            `name:"s3-endpoint" placeholder:"URL" help:"Endpoint URL of the S3-compatible object store backing S3 origins."`
-	S3Region   string            `name:"s3-region" default:"us-east-1" placeholder:"REGION" help:"Region used to sign requests to the object store."`
-	S3Access   string            `name:"s3-access-key" placeholder:"KEY" help:"Access key for the object store."`
-	S3Secret   string            `name:"s3-secret-key" placeholder:"KEY" help:"Secret key for the object store."`
-	Parameter  map[string]string `name:"parameter" placeholder:"KEY=VALUE" help:"Template parameter override; repeatable."`
-	KVSSeed    map[string]string `name:"kvs-seed" placeholder:"STORE=FILE" help:"KeyValueStore seed as <store>=<file.json>; repeatable."`
-	LogLevel   string            `name:"log-level" default:"info" enum:"debug,info,warn,error" placeholder:"LEVEL" help:"Log level (debug, info, warn, error)."`
+	S3Endpoint string            `name:"s3-endpoint" env:"LOCALFRONT_S3_ENDPOINT" placeholder:"URL" help:"Endpoint URL of the S3-compatible object store backing S3 origins."`
+	S3Region   string            `name:"s3-region" default:"us-east-1" env:"LOCALFRONT_S3_REGION" placeholder:"REGION" help:"Region used to sign requests to the object store."`
+	S3Access   string            `name:"s3-access-key" env:"LOCALFRONT_S3_ACCESS_KEY" placeholder:"KEY" help:"Access key for the object store."`
+	S3Secret   string            `name:"s3-secret-key" env:"LOCALFRONT_S3_SECRET_KEY" placeholder:"KEY" help:"Secret key for the object store."`
+	Parameter  map[string]string `name:"parameter" env:"LOCALFRONT_PARAMETER" placeholder:"KEY=VALUE" help:"Template parameter override; repeatable. Env: comma-separated KEY=VALUE pairs."`
+	KVSSeed    map[string]string `name:"kvs-seed" env:"LOCALFRONT_KVS_SEED" placeholder:"STORE=FILE" help:"KeyValueStore seed as <store>=<file.json>; repeatable. Env: comma-separated STORE=FILE pairs."`
+	LogLevel   string            `name:"log-level" default:"info" env:"LOCALFRONT_LOG_LEVEL" enum:"debug,info,warn,error" placeholder:"LEVEL" help:"Log level (debug, info, warn, error)."`
 }
 
 func main() {
@@ -44,6 +54,7 @@ func main() {
 		kong.Name("localfront"),
 		kong.Description(rootDescription),
 		kong.UsageOnError(),
+		kong.Vars{"version": version},
 	)
 
 	switch kctx.Command() {

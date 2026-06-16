@@ -1,0 +1,37 @@
+# Trim the build context to what the Go build actually needs. Everything
+# else just inflates upload time and the layer cache key.
+
+# Build artifacts
+/bin/
+/localfront
+
+# VCS / OS
+.git
+.gitignore
+.gitattributes
+.DS_Store
+
+# CI / tooling config not needed inside the image
+.github
+.golangci.yml
+aqua.yaml
+Taskfile.yml
+
+# Docs and examples — neither feeds the binary, both can change frequently
+docs/
+examples/
+scripts/
+README.md
+*.md
+
+# Tests-only roots (the package _test.go files still get copied via COPY .,
+# but the build only compiles cmd/localfront and its imports, so they are
+# excluded from the resulting binary anyway; trimming the contents here
+# keeps the context smaller).
+e2e/
+
+# Editor / cache
+.idea/
+.vscode/
+*.swp
+*.swo

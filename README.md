@@ -100,6 +100,50 @@ distribution E... [AssetsDistribution]
 
 Repeatable flags: `--template`, `--parameter KEY=VALUE` (overrides template parameter defaults), and `--kvs-seed STORE=FILE` (substitutes a local JSON for a KeyValueStore's `ImportSource`). `--listen` defaults to `:8080`; `--log-level` accepts `debug|info|warn|error`. `--public-host` is required (env: `LOCALFRONT_PUBLIC_HOST`).
 
+### Container image (GHCR)
+
+Pre-built images are published to `ghcr.io/mackee/localfront` (linux/amd64 + linux/arm64) on every release tag. The image is `gcr.io/distroless/static-debian12:nonroot`-based — about 16 MB, no shell or package manager. Every flag is also reachable as `LOCALFRONT_*`, so the binary can be fully configured by environment:
+
+```console
+$ docker run --rm -p 8080:8080 \
+    -v $PWD/template.yaml:/etc/localfront/template.yaml:ro \
+    -e LOCALFRONT_TEMPLATE=/etc/localfront/template.yaml \
+    -e LOCALFRONT_PUBLIC_HOST=assets.example.test:8080 \
+    -e LOCALFRONT_S3_ENDPOINT=http://host.docker.internal:9000 \
+    -e LOCALFRONT_S3_ACCESS_KEY=rustfsadmin \
+    -e LOCALFRONT_S3_SECRET_KEY=rustfsadmin \
+    --tmpfs /tmp \
+    ghcr.io/mackee/localfront:latest
+```
+
+`/tmp` must be writable: localfront sandboxes each CloudFront Function in its own tempdir under `os.TempDir()`. The image declares `VOLUME /tmp`, so `--tmpfs /tmp` (or a named volume) keeps the rest of the root filesystem read-only-able.
+
+Compose example:
+
+```yaml
+services:
+  localfront:
+    image: ghcr.io/mackee/localfront:latest
+    ports: ["8080:8080"]
+    environment:
+      LOCALFRONT_TEMPLATE: /etc/localfront/template.yaml
+      LOCALFRONT_PUBLIC_HOST: assets.example.test:8080
+      LOCALFRONT_S3_ENDPOINT: http://rustfs:9000
+      LOCALFRONT_S3_ACCESS_KEY: rustfsadmin
+      LOCALFRONT_S3_SECRET_KEY: rustfsadmin
+    volumes:
+      - ./template.yaml:/etc/localfront/template.yaml:ro
+      - ./seeds:/etc/localfront/seeds:ro
+    tmpfs:
+      - /tmp
+    depends_on: [rustfs]
+  rustfs:
+    image: rustfs/rustfs
+    ports: ["9000:9000"]
+```
+
+For repeatable flags via environment, separate entries with commas: `LOCALFRONT_TEMPLATE=/etc/localfront/a.yaml,/etc/localfront/b.yaml`, `LOCALFRONT_KVS_SEED=storeA=/etc/localfront/seeds/a.json,storeB=/etc/localfront/seeds/b.json`.
+
 ### Example template
 
 ```yaml
