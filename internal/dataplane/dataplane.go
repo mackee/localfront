@@ -121,6 +121,9 @@ func buildRoutes(cfg *config.Config) *routeTable {
 		}
 		t.exact[strings.ToLower(d.DomainName)] = d
 		for _, alias := range d.Aliases {
+			// Hostnames are case-insensitive and match() looks up a lowercased
+			// host, so store aliases lowercased too.
+			alias = strings.ToLower(alias)
 			if rest, ok := strings.CutPrefix(alias, "*"); ok {
 				t.wildcard = append(t.wildcard, wildcardRoute{suffix: rest, dist: d})
 				continue

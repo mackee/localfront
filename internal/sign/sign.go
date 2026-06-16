@@ -59,7 +59,9 @@ func deny(format string, args ...any) error {
 
 // Verify checks the signed-URL or signed-cookie credentials on r against the
 // trusted keys. It returns nil when access is granted, or a *DenyError.
-func Verify(r *http.Request, trusted []Key, now time.Time) error {
+// defaultRootObject is the distribution's root object: a request for the root is
+// served (and was signed) as that object, so it is resolved before matching.
+func Verify(r *http.Request, trusted []Key, now time.Time, defaultRootObject string) error {
 	c, err := extractCredentials(r)
 	if err != nil {
 		return err
@@ -74,9 +76,19 @@ func Verify(r *http.Request, trusted []Key, now time.Time) error {
 	}
 
 	if c.policy != "" {
-		return verifyCustom(r, key, c.policy, sig, now)
+		return verifyCustom(r, key, c.policy, sig, now, defaultRootObject)
 	}
-	return verifyCanned(r, key, c.expires, sig, now)
+	return verifyCanned(r, key, c.expires, sig, now, defaultRootObject)
+}
+
+// applyDefaultRootObject mirrors the data plane: a request for the distribution
+// root ("" or "/") is served as the default root object, which is the URL the
+// signer signed, so the resource is reconstructed/matched against that object.
+func applyDefaultRootObject(path, defaultRootObject string) string {
+	if (path == "" || path == "/") && defaultRootObject != "" {
+		return "/" + defaultRootObject
+	}
+	return path
 }
 
 type credentials struct {
@@ -135,15 +147,19 @@ func findKey(trusted []Key, id string) *rsa.PublicKey {
 // URL (the base URL with its application query string, but without CloudFront's
 // signing parameters), which localfront reconstructs from the request; the
 // viewer side is plain HTTP locally, so both https and http resources are tried.
-func verifyCanned(r *http.Request, key *rsa.PublicKey, expires string, sig []byte, now time.Time) error {
+func verifyCanned(r *http.Request, key *rsa.PublicKey, expires string, sig []byte, now time.Time, defaultRootObject string) error {
 	exp, err := strconv.ParseInt(expires, 10, 64)
 	if err != nil {
 		return deny("malformed Expires")
 	}
 	query := resourceQuery(r.URL.RawQuery)
+	// EscapedPath preserves the exact percent-encoding the signer signed;
+	// net/http has already decoded r.URL.Path, which would break verification
+	// for resources whose path contains escaped bytes.
+	escapedPath := applyDefaultRootObject(r.URL.EscapedPath(), defaultRootObject)
 	matched := false
 	for _, scheme := range []string{"https", "http"} {
-		resource := scheme + "://" + r.Host + r.URL.Path
+		resource := scheme + "://" + r.Host + escapedPath
 		if query != "" {
 			resource += "?" + query
 		}
@@ -163,7 +179,7 @@ func verifyCanned(r *http.Request, key *rsa.PublicKey, expires string, sig []byt
 
 // verifyCustom validates a custom policy: the signature covers the decoded
 // policy document verbatim, and its conditions are then enforced.
-func verifyCustom(r *http.Request, key *rsa.PublicKey, policyParam string, sig []byte, now time.Time) error {
+func verifyCustom(r *http.Request, key *rsa.PublicKey, policyParam string, sig []byte, now time.Time, defaultRootObject string) error {
 	jsonPolicy, err := awsBase64Decode(policyParam)
 	if err != nil {
 		return deny("malformed Policy")
@@ -186,7 +202,7 @@ func verifyCustom(r *http.Request, key *rsa.PublicKey, policyParam string, sig [
 			return err
 		}
 	}
-	if !resourceMatches(stmt.resource, r.URL.Path) {
+	if !resourceMatches(stmt.resource, applyDefaultRootObject(r.URL.Path, defaultRootObject)) {
 		return deny("the request does not match the signed resource")
 	}
 	return nil
@@ -339,6 +355,12 @@ func resourceMatches(resource, path string) bool {
 		} else {
 			pattern = "/"
 		}
+	}
+	// Drop the query string: only the path part is matched (fidelity note 15).
+	// An SDK-signed Resource such as ".../video.mp4?foo=bar" must still match the
+	// request path, which net/http exposes without the query.
+	if q := strings.IndexByte(pattern, '?'); q >= 0 {
+		pattern = pattern[:q]
 	}
 	return matchGlob(pattern, path)
 }

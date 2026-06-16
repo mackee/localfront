@@ -14,6 +14,10 @@ type Request struct {
 	Bucket string
 	Key    string
 	Method string // "GET" or "HEAD"
+	// RawQuery is the forwarded query string, already filtered by the behavior's
+	// cache/origin-request policies. CloudFront forwards it to the origin, so the
+	// store receives query-dependent parameters such as versionId.
+	RawQuery string
 	// Headers are viewer headers forwarded to the store unchanged: Range and
 	// the conditional headers (If-None-Match, If-Modified-Since, ...).
 	Headers http.Header

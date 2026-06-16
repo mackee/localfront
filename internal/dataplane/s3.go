@@ -23,19 +23,28 @@ func (s *Server) fetchS3Origin(ctx context.Context, r *http.Request, dist *confi
 	key := s3Key(o.OriginPath, r.URL.Path, dist.DefaultRootObject)
 
 	// S3 origins receive the policy-selected headers plus the always-forwarded
-	// Range and conditional headers.
+	// Range and conditional headers, mirroring the custom-origin path.
 	headers := http.Header{}
 	for name, values := range originReq.Headers {
 		headers[name] = append([]string(nil), values...)
 	}
 	addAlwaysForwardedHeaders(headers, r.Header)
+	removeHopByHopHeaders(headers)
+	if originReq.AcceptEncoding != "" {
+		headers.Set("Accept-Encoding", originReq.AcceptEncoding)
+	}
+	// Static origin custom headers reach S3 origins too, like custom origins.
+	for _, h := range o.CustomHeaders {
+		headers.Set(h.Name, h.Value)
+	}
 
 	reqCtx, cancel := context.WithTimeout(ctx, s3RequestTimeout)
 	resp, err := s.s3.Fetch(reqCtx, &origin.Request{
-		Bucket:  o.S3.Bucket,
-		Key:     key,
-		Method:  r.Method,
-		Headers: headers,
+		Bucket:   o.S3.Bucket,
+		Key:      key,
+		Method:   r.Method,
+		RawQuery: originReq.RawQuery,
+		Headers:  headers,
 	})
 	if err != nil {
 		cancel()
@@ -61,8 +70,15 @@ func (s *Server) s3UnconfiguredResponse() *originResponse {
 // the default root object only at the distribution root (CloudFront does not
 // append it to subdirectory paths).
 func s3Key(originPath, urlPath, defaultRootObject string) string {
+	return strings.TrimPrefix(originPath+applyDefaultRootObject(urlPath, defaultRootObject), "/")
+}
+
+// applyDefaultRootObject substitutes the default root object for a request at
+// the distribution root ("" or "/"). CloudFront applies it for every origin
+// type, but only at the root, never to subdirectory paths.
+func applyDefaultRootObject(urlPath, defaultRootObject string) string {
 	if (urlPath == "" || urlPath == "/") && defaultRootObject != "" {
-		urlPath = "/" + defaultRootObject
+		return "/" + defaultRootObject
 	}
-	return strings.TrimPrefix(originPath+urlPath, "/")
+	return urlPath
 }

@@ -1,7 +1,6 @@
 package behavior
 
 import (
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -24,10 +23,9 @@ func SynthesizeViewerHeaders(r *http.Request) http.Header {
 	h := http.Header{}
 	h.Set("CloudFront-Forwarded-Proto", "http") // the viewer side is always plain HTTP
 	h.Set("CloudFront-Viewer-Http-Version", httpVersion(r.ProtoMajor, r.ProtoMinor))
+	// CloudFront-Viewer-Address carries the full "ip:port" of the viewer; the
+	// IP-only value is surfaced separately as event.viewer.ip.
 	h.Set("CloudFront-Viewer-Address", r.RemoteAddr)
-	if ip := clientIP(r.RemoteAddr); ip != "" {
-		h.Set("CloudFront-Viewer-Address", ip)
-	}
 	h.Set("CloudFront-Viewer-Country", "US")
 	h.Set("CloudFront-Viewer-TLS", "")
 	// Device detection defaults to desktop; override the flags per request to
@@ -66,11 +64,4 @@ func httpVersion(major, minor int) string {
 	default:
 		return "HTTP/1." + strconv.Itoa(minor)
 	}
-}
-
-func clientIP(remoteAddr string) string {
-	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
-		return host
-	}
-	return remoteAddr
 }

@@ -146,6 +146,89 @@ function handler(event) {
 	}
 }
 
+// CloudFront Functions are not invoked for origin responses with a 4xx/5xx
+// status, so the viewer-response function must not run on an origin error.
+func TestM5_ViewerResponse_SkippedOnOriginError(t *testing.T) {
+	originSrv, host, port := newTestOriginServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, "not found")
+	})
+	_ = originSrv
+
+	o := customOrigin("o1", host, port)
+	beh := getHeadBehavior(o, "")
+	beh.ViewerResponse = &config.Function{LogicalID: "Resp", Name: "resp"}
+	dist := &config.Distribution{
+		LogicalID: "D1", ID: "D1", DomainName: "d1.cloudfront.localhost",
+		Aliases: []string{"site.example.test"}, Enabled: true,
+		Origins: []*config.Origin{o}, DefaultBehavior: beh,
+	}
+	cfg := &config.Config{Distributions: []*config.Distribution{dist}}
+
+	fn := mustCompileFn(t, "resp", `
+function handler(event) {
+	event.response.headers['x-frame-options'] = { value: 'DENY' };
+	return event.response;
+}`, nil)
+	srv := dataplane.New(cfg, newLogger())
+	srv.Swap(cfg, map[string]*cffunc.Function{"Resp": fn})
+
+	req := httptest.NewRequest(http.MethodGet, "http://site.example.test/missing", nil)
+	req.Host = "site.example.test"
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rr.Code)
+	}
+	if got := rr.Header().Get("X-Frame-Options"); got != "" {
+		t.Errorf("X-Frame-Options = %q, want empty (function must not run on a 4xx origin response)", got)
+	}
+}
+
+// A custom error response that rewrites the origin error below 400 makes the
+// response eligible for the viewer-response function again.
+func TestM5_ViewerResponse_RunsAfterErrorResponseRewrite(t *testing.T) {
+	originSrv, host, port := newTestOriginServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, "not found")
+	})
+	_ = originSrv
+
+	o := customOrigin("o1", host, port)
+	beh := getHeadBehavior(o, "")
+	beh.ViewerResponse = &config.Function{LogicalID: "Resp", Name: "resp"}
+	dist := &config.Distribution{
+		LogicalID: "D1", ID: "D1", DomainName: "d1.cloudfront.localhost",
+		Aliases: []string{"site.example.test"}, Enabled: true,
+		Origins: []*config.Origin{o}, DefaultBehavior: beh,
+		ErrorResponses: []*config.ErrorResponse{
+			{ErrorCode: 404, ResponseCode: 200, ResponsePagePath: ""},
+		},
+	}
+	cfg := &config.Config{Distributions: []*config.Distribution{dist}}
+
+	fn := mustCompileFn(t, "resp", `
+function handler(event) {
+	event.response.headers['x-frame-options'] = { value: 'DENY' };
+	return event.response;
+}`, nil)
+	srv := dataplane.New(cfg, newLogger())
+	srv.Swap(cfg, map[string]*cffunc.Function{"Resp": fn})
+
+	req := httptest.NewRequest(http.MethodGet, "http://site.example.test/missing", nil)
+	req.Host = "site.example.test"
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (custom error response rewrote the 404)", rr.Code)
+	}
+	if got := rr.Header().Get("X-Frame-Options"); got != "DENY" {
+		t.Errorf("X-Frame-Options = %q, want DENY (function should run after the rewrite to 200)", got)
+	}
+}
+
 // The behavior is selected once, before the function runs: a function rewriting
 // the URI does NOT cause re-selection to a different behavior/origin.
 func TestM5_BehaviorNotReevaluatedAfterRewrite(t *testing.T) {

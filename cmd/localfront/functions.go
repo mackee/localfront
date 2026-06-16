@@ -13,17 +13,57 @@ import (
 	"github.com/mackee/localfront/internal/origin"
 )
 
-// buildFunctions compiles every CloudFront Function in the config, wiring each
-// to its associated (seeded) KeyValueStore. On any compile error it closes the
-// functions it already built and returns the error.
+// reachableResources returns the LogicalIDs of CloudFront Functions and
+// KeyValueStores reachable from enabled distributions. Disabled distributions
+// are never routed (see buildRoutes), so their functions are not compiled and
+// their stores do not require the object store — mirroring how routing ignores
+// them. Functions/stores not associated with any enabled behavior are also
+// excluded, since CloudFront never executes them.
+func reachableResources(cfg *config.Config) (funcs, kvs map[string]bool) {
+	funcs = map[string]bool{}
+	kvs = map[string]bool{}
+	for _, d := range cfg.Distributions {
+		if !d.Enabled {
+			continue
+		}
+		behaviors := make([]*config.Behavior, 0, len(d.Behaviors)+1)
+		behaviors = append(behaviors, d.DefaultBehavior)
+		behaviors = append(behaviors, d.Behaviors...)
+		for _, b := range behaviors {
+			if b == nil {
+				continue
+			}
+			for _, fn := range []*config.Function{b.ViewerRequest, b.ViewerResponse} {
+				if fn == nil {
+					continue
+				}
+				funcs[fn.LogicalID] = true
+				for _, store := range fn.KeyValueStores {
+					kvs[store.LogicalID] = true
+				}
+			}
+		}
+	}
+	return funcs, kvs
+}
+
+// buildFunctions compiles the CloudFront Functions reachable from enabled
+// distributions, wiring each to its associated (seeded) KeyValueStore. On any
+// compile error it closes the functions it already built and returns the error.
 func buildFunctions(cfg *config.Config, s3 origin.Fetcher, seeds map[string]string, logger *slog.Logger) (map[string]*cffunc.Function, error) {
-	stores, err := buildKVSStores(cfg, s3, seeds, logger)
+	reachableFuncs, reachableKVS := reachableResources(cfg)
+	stores, err := buildKVSStores(cfg, reachableKVS, s3, seeds, logger)
 	if err != nil {
 		return nil, err
 	}
 
 	funcs := map[string]*cffunc.Function{}
 	for _, fn := range cfg.Functions {
+		if !reachableFuncs[fn.LogicalID] {
+			// Compiling a function only a disabled distribution references would
+			// make an unreachable function's compile error fatal to startup.
+			continue
+		}
 		var kvs *cffunc.KVS
 		if len(fn.KeyValueStores) > 0 {
 			kvs = stores[fn.KeyValueStores[0].LogicalID]
@@ -58,15 +98,17 @@ func closeFunctions(funcs map[string]*cffunc.Function) {
 
 // buildKVSStores creates and seeds the in-memory KeyValueStores. Each store is
 // seeded from its ImportSource (fetched from the object store) and then, if a
-// matching --kvs-seed was given, overridden by that local file.
-func buildKVSStores(cfg *config.Config, s3 origin.Fetcher, seeds map[string]string, logger *slog.Logger) (map[string]*cffunc.KVS, error) {
+// matching --kvs-seed was given, overridden by that local file. A store reachable
+// only from disabled distributions is created empty: its ImportSource is not
+// fetched, so it does not force the object-store requirement.
+func buildKVSStores(cfg *config.Config, reachableKVS map[string]bool, s3 origin.Fetcher, seeds map[string]string, logger *slog.Logger) (map[string]*cffunc.KVS, error) {
 	stores := map[string]*cffunc.KVS{}
 	usedSeeds := map[string]bool{}
 
 	for _, kvs := range cfg.KeyValueStores {
 		data := map[string]string{}
 
-		if kvs.ImportSourceARN != "" {
+		if kvs.ImportSourceARN != "" && reachableKVS[kvs.LogicalID] {
 			if s3 == nil {
 				return nil, fmt.Errorf("KeyValueStore %s has an ImportSource but no object store is configured (set --s3-endpoint)", kvs.Name)
 			}

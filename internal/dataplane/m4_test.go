@@ -209,6 +209,57 @@ func TestM4_CustomErrorResponse_CrossBehaviorForwarding(t *testing.T) {
 	}
 }
 
+// The error page is an unconditioned GET of a different resource, so the
+// viewer's Range and conditional headers must not be re-forwarded to it (else
+// the page origin could answer 206/304 against the error page).
+func TestM4_CustomErrorResponse_DropsRangeAndConditional(t *testing.T) {
+	var pageRange, pageINM string
+	originSrv, host, port := newTestOriginServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/index.html" {
+			pageRange = r.Header.Get("Range")
+			pageINM = r.Header.Get("If-None-Match")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, "<html>spa</html>")
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	_ = originSrv
+
+	o := customOrigin("o1", host, port)
+	dist := &config.Distribution{
+		LogicalID:       "D1",
+		ID:              "D1",
+		DomainName:      "d1.cloudfront.localhost",
+		Aliases:         []string{"spa.example.test"},
+		Enabled:         true,
+		Origins:         []*config.Origin{o},
+		DefaultBehavior: getHeadBehavior(o, ""),
+		ErrorResponses: []*config.ErrorResponse{
+			{ErrorCode: 404, ResponseCode: 200, ResponsePagePath: "/index.html"},
+		},
+	}
+	cfg := &config.Config{Distributions: []*config.Distribution{dist}}
+	srv := dataplane.New(cfg, newLogger())
+
+	req := httptest.NewRequest(http.MethodGet, "http://spa.example.test/missing", nil)
+	req.Host = "spa.example.test"
+	req.Header.Set("Range", "bytes=0-10")
+	req.Header.Set("If-None-Match", `"etag"`)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (SPA fallback)", rr.Code)
+	}
+	if pageRange != "" {
+		t.Errorf("error-page origin received Range %q, want it stripped", pageRange)
+	}
+	if pageINM != "" {
+		t.Errorf("error-page origin received If-None-Match %q, want it stripped", pageINM)
+	}
+}
+
 func TestM4_CustomErrorResponse_StatusRewriteNoPage(t *testing.T) {
 	originSrv, host, port := newTestOriginServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

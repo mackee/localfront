@@ -125,11 +125,18 @@ func NewRequestEvent(eventType string, ctx Context, r *http.Request, viewerHeade
 }
 
 // AttachResponse adds the response half to an event, for viewer-response.
+// Set-Cookie headers are surfaced separately as response.cookies (CloudFront
+// Functions model them there, not in response.headers), so a function can read
+// and modify existing cookies instead of emitting duplicates.
 func (e *Event) AttachResponse(statusCode int, header http.Header) {
-	e.Response = &Response{
+	resp := &Response{
 		StatusCode: statusCode,
 		Headers:    headersToFields(header, nil),
 	}
+	if cookies := setCookiesToMap(header.Values("Set-Cookie")); len(cookies) > 0 {
+		resp.Cookies = cookies
+	}
+	e.Response = resp
 }
 
 // ApplyToRequest writes the function's modified request back onto r: URI, query
@@ -199,13 +206,13 @@ func fieldsToQuery(fields map[string]Field) string {
 }
 
 // headersToFields lowercases header names (CloudFront event convention) and
-// merges synthesized CloudFront-* headers on top. Cookie is omitted (it is
-// represented separately as cookies).
+// merges synthesized CloudFront-* headers on top. Cookie and Set-Cookie are
+// omitted (they are represented separately as cookies).
 func headersToFields(header, viewerHeaders http.Header) map[string]Field {
 	out := map[string]Field{}
 	for name, values := range header {
 		lower := strings.ToLower(name)
-		if lower == "cookie" {
+		if lower == "cookie" || lower == "set-cookie" {
 			continue
 		}
 		out[lower] = fieldFromValues(values)
@@ -259,6 +266,27 @@ func cookiesToMap(cookieHeader string) map[string]Cookie {
 		}
 		name, value, _ := strings.Cut(pair, "=")
 		out[strings.TrimSpace(name)] = Cookie{Value: value}
+	}
+	return out
+}
+
+// setCookiesToMap parses response Set-Cookie headers into the event's cookies
+// map: each name maps to its value plus the remaining attributes string (e.g.
+// "Path=/; Secure"), matching how CloudFront Functions expose response cookies.
+// HTTPHeaders reverses this back to Set-Cookie headers.
+func setCookiesToMap(setCookies []string) map[string]ResponseCookie {
+	out := map[string]ResponseCookie{}
+	for _, sc := range setCookies {
+		first, attrs, _ := strings.Cut(sc, ";")
+		name, value, _ := strings.Cut(strings.TrimSpace(first), "=")
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		out[name] = ResponseCookie{
+			Value:      strings.TrimSpace(value),
+			Attributes: strings.TrimSpace(attrs),
+		}
 	}
 	return out
 }

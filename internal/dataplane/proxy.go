@@ -46,11 +46,16 @@ func (s *Server) fetchCustomOrigin(ctx context.Context, r *http.Request, dist *c
 		hostport = net.JoinHostPort(co.Host, strconv.Itoa(port))
 	}
 
+	// CloudFront applies the default root object before forwarding to any origin
+	// type, so a viewer request for "/" reaches a custom origin as the configured
+	// root object (e.g. "/index.html").
+	urlPath := applyDefaultRootObject(r.URL.Path, dist.DefaultRootObject)
 	outURL := *r.URL
 	outURL.Scheme = scheme
 	outURL.Host = hostport
-	outURL.Path = origin.OriginPath + r.URL.Path
-	if r.URL.RawPath != "" {
+	outURL.Path = origin.OriginPath + urlPath
+	outURL.RawPath = ""
+	if urlPath == r.URL.Path && r.URL.RawPath != "" {
 		outURL.RawPath = origin.OriginPath + r.URL.RawPath
 	}
 	outURL.RawQuery = originReq.RawQuery

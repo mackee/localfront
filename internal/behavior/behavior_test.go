@@ -1,6 +1,8 @@
 package behavior
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/mackee/localfront/internal/config"
@@ -87,5 +89,15 @@ func TestSelect_NoBehaviorsReturnsDefault(t *testing.T) {
 	dist := &config.Distribution{DefaultBehavior: def}
 	if got := Select(dist, "/anything"); got != def {
 		t.Errorf("Select with no cache behaviors should return the default behavior")
+	}
+}
+
+func TestSynthesizeViewerHeaders_ViewerAddressKeepsPort(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+	r.RemoteAddr = "203.0.113.5:4444"
+	h := SynthesizeViewerHeaders(r)
+	// CloudFront-Viewer-Address carries the full "ip:port", not the IP alone.
+	if got := h.Get("CloudFront-Viewer-Address"); got != "203.0.113.5:4444" {
+		t.Errorf("CloudFront-Viewer-Address = %q, want 203.0.113.5:4444", got)
 	}
 }

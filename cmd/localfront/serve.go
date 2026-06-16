@@ -142,9 +142,14 @@ func printSummary(listener net.Listener, opts *serveOptions, cfg *config.Config)
 	}
 }
 
-// configUsesS3 reports whether any distribution has an S3 origin.
+// configUsesS3 reports whether any enabled distribution has an S3 origin.
+// Disabled distributions are never routed (see buildRoutes), so they must not
+// force the --s3-endpoint requirement.
 func configUsesS3(cfg *config.Config) bool {
 	for _, d := range cfg.Distributions {
+		if !d.Enabled {
+			continue
+		}
 		for _, o := range d.Origins {
 			if o.S3 != nil {
 				return true
@@ -154,11 +159,14 @@ func configUsesS3(cfg *config.Config) bool {
 	return false
 }
 
-// configUsesKVSImportSource reports whether any KeyValueStore loads its seed
-// data from the object store.
+// configUsesKVSImportSource reports whether a KeyValueStore reachable from an
+// enabled distribution loads its seed data from the object store. Stores reached
+// only from disabled distributions are not seeded (see buildKVSStores), so they
+// must not force the --s3-endpoint requirement.
 func configUsesKVSImportSource(cfg *config.Config) bool {
+	_, reachableKVS := reachableResources(cfg)
 	for _, kvs := range cfg.KeyValueStores {
-		if kvs.ImportSourceARN != "" {
+		if kvs.ImportSourceARN != "" && reachableKVS[kvs.LogicalID] {
 			return true
 		}
 	}

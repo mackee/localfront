@@ -67,6 +67,9 @@ func (c *S3Client) Fetch(ctx context.Context, req *Request) (*Response, error) {
 
 	u := *c.endpoint
 	u.Path = strings.TrimRight(c.endpoint.Path, "/") + "/" + req.Bucket + "/" + req.Key
+	// The SigV4 signer canonicalizes the query string, so forwarded parameters
+	// (e.g. versionId) are covered by the signature.
+	u.RawQuery = req.RawQuery
 
 	httpReq, err := http.NewRequestWithContext(ctx, method, u.String(), nil)
 	if err != nil {

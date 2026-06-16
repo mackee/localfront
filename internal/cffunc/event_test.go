@@ -104,6 +104,43 @@ func TestResponseHTTPHeaders_Cookies(t *testing.T) {
 	}
 }
 
+func TestAttachResponse_SetCookie(t *testing.T) {
+	header := http.Header{}
+	header.Set("Content-Type", "text/html")
+	header.Add("Set-Cookie", "session=abc; Path=/; Secure")
+	header.Add("Set-Cookie", "theme=dark")
+
+	ev := &Event{}
+	ev.AttachResponse(http.StatusOK, header)
+
+	// Set-Cookie is modeled as response.cookies, not response.headers, so a
+	// function can read and modify existing cookies instead of duplicating them.
+	if _, ok := ev.Response.Headers["set-cookie"]; ok {
+		t.Error("set-cookie must not appear in response.headers")
+	}
+	if got := ev.Response.Headers["content-type"].Value; got != "text/html" {
+		t.Errorf("content-type = %q, want text/html", got)
+	}
+	if c := ev.Response.Cookies["session"]; c.Value != "abc" || c.Attributes != "Path=/; Secure" {
+		t.Errorf("cookies[session] = %+v, want value=abc attributes=Path=/; Secure", c)
+	}
+	if c := ev.Response.Cookies["theme"]; c.Value != "dark" || c.Attributes != "" {
+		t.Errorf("cookies[theme] = %+v, want value=dark attributes=(empty)", c)
+	}
+
+	// Round-trip: HTTPHeaders reproduces the original Set-Cookie set (sorted).
+	got := ev.Response.HTTPHeaders().Values("Set-Cookie")
+	want := []string{"session=abc; Path=/; Secure", "theme=dark"}
+	if len(got) != len(want) {
+		t.Fatalf("Set-Cookie round-trip = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Set-Cookie[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestResponseCookies_Unmarshal(t *testing.T) {
 	const raw = `{"statusCode":200,"cookies":{"id":{"value":"v1","attributes":"Path=/"}}}`
 	var resp Response

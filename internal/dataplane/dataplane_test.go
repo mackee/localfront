@@ -302,6 +302,42 @@ func TestProxy_OriginPath(t *testing.T) {
 	}
 }
 
+func TestProxy_DefaultRootObject(t *testing.T) {
+	var receivedPath string
+	originSrv, host, port := newTestOriginServer(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	})
+	_ = originSrv
+
+	origin := baseOrigin("o1", host, port)
+	dist := baseDistribution("D1", "d1.cloudfront.localhost", []string{"assets.example.test"}, origin)
+	dist.DefaultRootObject = "index.html"
+	cfg := &config.Config{Distributions: []*config.Distribution{dist}}
+	srv := dataplane.New(cfg, newLogger())
+
+	do := func(path string) string {
+		req := httptest.NewRequest(http.MethodGet, "http://assets.example.test"+path, nil)
+		req.Host = "assets.example.test"
+		rr := httptest.NewRecorder()
+		srv.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Errorf("path %q: status=%d want=200", path, rr.Code)
+		}
+		return receivedPath
+	}
+
+	// CloudFront applies the default root object at the distribution root for
+	// every origin type, including custom origins.
+	if got := do("/"); got != "/index.html" {
+		t.Errorf("custom origin received %q for '/', want /index.html", got)
+	}
+	// Subdirectory paths are left untouched.
+	if got := do("/sub/page.html"); got != "/sub/page.html" {
+		t.Errorf("custom origin received %q, want /sub/page.html (subdir unchanged)", got)
+	}
+}
+
 func TestProxy_OriginCustomHeaders(t *testing.T) {
 	var gotCustom, gotViewer string
 

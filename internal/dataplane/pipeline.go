@@ -47,7 +47,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, dist *config.Dist
 	// could rewrite the URI the canned policy signs) is still to be confirmed
 	// against a live distribution; localfront verifies before the function runs.
 	if len(beh.TrustedKeyGroups) > 0 {
-		if err := sign.Verify(r, snap.trustedKeys(beh), time.Now()); err != nil {
+		if err := sign.Verify(r, snap.trustedKeys(beh), time.Now(), dist.DefaultRootObject); err != nil {
 			s.logger.Info("signed URL/cookie verification failed", "distribution", dist.LogicalID, "reason", err)
 			writeCFError(w, http.StatusForbidden, requestID, "Access denied: "+err.Error())
 			return
@@ -79,7 +79,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, dist *config.Dist
 			resp.close()
 			resp = applied
 		}
-		if beh.ViewerResponse != nil {
+		// CloudFront Functions are not invoked for origin responses with a 4xx/5xx
+		// status, so skip the viewer-response function unless a custom error
+		// response above already rewrote the status below 400.
+		if beh.ViewerResponse != nil && resp.statusCode < 400 {
 			if !s.runViewerResponse(w, r, dist, beh, snap, viewerHeaders, resp, requestID) {
 				resp.close()
 				return // a 503 was already written
@@ -133,6 +136,12 @@ func (s *Server) applyErrorResponse(ctx context.Context, r *http.Request, dist *
 	pageReq.Method = http.MethodGet
 	pageReq.Body = nil
 	pageReq.ContentLength = 0
+	// The error page is an unconditioned GET of a different resource: drop the
+	// viewer's Range and conditional headers so the page origin can't answer
+	// 206/304 against the error page (which is then served with ResponseCode).
+	for _, h := range alwaysForwardedHeaders {
+		pageReq.Header.Del(h)
+	}
 	pageURL := *r.URL
 	pageURL.Path = er.ResponsePagePath
 	pageURL.RawPath = ""

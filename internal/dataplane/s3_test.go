@@ -247,6 +247,78 @@ func TestS3Proxy_ForwardedHeaders(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────
+// Parity with the custom-origin path: query string, Accept-Encoding, and
+// origin custom headers reach the S3 store; hop-by-hop headers do not.
+// ─────────────────────────────────────────────────
+
+func TestS3Proxy_ForwardsQueryAcceptEncodingAndCustomHeaders(t *testing.T) {
+	o := s3TestOrigin("s3", "assets", "")
+	o.CustomHeaders = []config.Header{{Name: "X-Origin-Token", Value: "secret"}}
+	dist := s3TestDistribution("assets.cloudfront.localhost", "", o)
+	// Forward all query strings and normalize Accept-Encoding to gzip.
+	dist.DefaultBehavior.CachePolicy = &config.CachePolicy{
+		Gzip:         true,
+		QueryStrings: config.ListSelection{Behavior: "all"},
+	}
+	cfg := &config.Config{Distributions: []*config.Distribution{dist}}
+
+	fake := &fakeFetcher{}
+	srv := newS3Server(cfg, fake)
+
+	req := newS3CFRequest(http.MethodGet, "assets.cloudfront.localhost", "/file.bin?versionId=v2&x=1")
+	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if fake.lastReq == nil {
+		t.Fatal("fetcher was not called")
+	}
+	if got := fake.lastReq.RawQuery; got != "versionId=v2&x=1" {
+		t.Errorf("RawQuery = %q, want versionId=v2&x=1", got)
+	}
+	if got := fake.lastReq.Headers.Get("Accept-Encoding"); got != "gzip" {
+		t.Errorf("Accept-Encoding = %q, want gzip", got)
+	}
+	if got := fake.lastReq.Headers.Get("X-Origin-Token"); got != "secret" {
+		t.Errorf("origin custom header X-Origin-Token = %q, want secret", got)
+	}
+}
+
+func TestS3Proxy_StripsHopByHopHeaders(t *testing.T) {
+	o := s3TestOrigin("s3", "assets", "")
+	dist := s3TestDistribution("assets.cloudfront.localhost", "", o)
+	// allViewer forwards every viewer header into BuildOriginRequest's output,
+	// including hop-by-hop ones; the data plane must strip them before signing.
+	dist.DefaultBehavior.OriginRequestPolicy = &config.OriginRequestPolicy{
+		Headers: config.ListSelection{Behavior: "allViewer"},
+	}
+	cfg := &config.Config{Distributions: []*config.Distribution{dist}}
+
+	fake := &fakeFetcher{}
+	srv := newS3Server(cfg, fake)
+
+	req := newS3CFRequest(http.MethodGet, "assets.cloudfront.localhost", "/file.bin")
+	req.Header.Set("Connection", "X-Drop-Me")
+	req.Header.Set("X-Drop-Me", "1")
+	req.Header.Set("Keep-Alive", "timeout=5")
+	req.Header.Set("X-Keep-Me", "ok")
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if fake.lastReq == nil {
+		t.Fatal("fetcher was not called")
+	}
+	for _, h := range []string{"Connection", "X-Drop-Me", "Keep-Alive"} {
+		if got := fake.lastReq.Headers.Get(h); got != "" {
+			t.Errorf("hop-by-hop header %s should be stripped, got %q", h, got)
+		}
+	}
+	if got := fake.lastReq.Headers.Get("X-Keep-Me"); got != "ok" {
+		t.Errorf("X-Keep-Me = %q, want ok (non-hop-by-hop must still pass)", got)
+	}
+}
+
+// ─────────────────────────────────────────────────
 // B4: Error and passthrough status codes
 // ─────────────────────────────────────────────────
 
