@@ -1,0 +1,36 @@
+# SPA hosting (e.g. a React/Vite build) served from an S3 origin.
+#
+#   localfront serve --template examples/spa-hosting/template.yaml \
+#     --s3-endpoint http://localhost:9000 \
+#     --s3-access-key rustfsadmin --s3-secret-key rustfsadmin
+#
+# Upload the build output to the matching bucket first:
+#   aws --endpoint-url http://localhost:9000 s3 mb s3://spa-assets
+#   aws --endpoint-url http://localhost:9000 s3 sync examples/spa-hosting/dist s3://spa-assets
+Resources:
+  SpaDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        Aliases:
+          - spa.example.test
+        Origins:
+          - Id: s3
+            DomainName: spa-assets.s3.us-east-1.amazonaws.com
+            S3OriginConfig: {}
+        DefaultCacheBehavior:
+          TargetOriginId: s3
+          ViewerProtocolPolicy: allow-all
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # Managed-CachingOptimized
+        CustomErrorResponses:
+          # Classic SPA fallback — deep links resolve to the app shell.
+          # (Custom error responses are applied starting in milestone M4.)
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html

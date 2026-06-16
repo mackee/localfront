@@ -1,0 +1,47 @@
+# runn scenario verifying the functions example end to end.
+#
+# Driven by the e2e test (go test -tags e2e ./e2e/...), which starts an echo
+# origin and localfront, then runs:
+#
+#   LF_ENDPOINT=http://127.0.0.1:<port> runn run examples/functions/scenario.yaml
+#
+# The Host header selects the distribution; localfront routes by it.
+desc: functions example — URL normalization, redirect, and a KVS feature flag
+labels:
+  - localfront
+  - examples
+runners:
+  req:
+    endpoint: ${LF_ENDPOINT:-http://127.0.0.1:8080}
+    notFollowRedirect: true
+steps:
+  normalize:
+    desc: a directory request is rewritten to /index.html by the viewer-request function
+    req:
+      /docs/:
+        get:
+          headers:
+            Host: app.example.test
+          body: null
+    test: |
+      current.res.status == 200 && current.res.headers["X-Echo-Path"][0] == "/docs/index.html"
+  redirect:
+    desc: a retired path is answered with a 301 by the function (the origin is never hit)
+    req:
+      /old-home:
+        get:
+          headers:
+            Host: app.example.test
+          body: null
+    test: |
+      current.res.status == 301 && current.res.headers["Location"][0] == "/"
+  feature_flag:
+    desc: the KVS feature flag value is forwarded to the origin
+    req:
+      /landing:
+        get:
+          headers:
+            Host: app.example.test
+          body: null
+    test: |
+      current.res.status == 200 && current.res.headers["X-Echo-Variant"][0] == "beta"

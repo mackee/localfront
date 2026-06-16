@@ -1,0 +1,41 @@
+# Static assets from S3 with an /api/* path routed to a separate HTTP backend.
+#
+#   localfront serve --template examples/static-and-api/template.yaml \
+#     --s3-endpoint http://localhost:9000 \
+#     --s3-access-key rustfsadmin --s3-secret-key rustfsadmin
+#
+# The API origin points at a local backend on 127.0.0.1:3000 — adjust the host
+# and port to your service. Cache behaviors are matched in listing order, so
+# /api/* wins for API paths and everything else falls through to the S3 default.
+Resources:
+  SiteDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        Aliases:
+          - site.example.test
+        Origins:
+          - Id: static
+            DomainName: site-assets.s3.us-east-1.amazonaws.com
+            S3OriginConfig: {}
+          - Id: api
+            DomainName: 127.0.0.1
+            CustomOriginConfig:
+              HTTPPort: 3000
+              OriginProtocolPolicy: http-only
+        DefaultCacheBehavior:
+          TargetOriginId: static
+          ViewerProtocolPolicy: allow-all
+          Compress: true
+          # CachingOptimized: no query strings / cookies forwarded to S3.
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+        CacheBehaviors:
+          - PathPattern: /api/*
+            TargetOriginId: api
+            ViewerProtocolPolicy: allow-all
+            AllowedMethods: [ GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE ]
+            # CachingDisabled + AllViewer: forward everything to the backend.
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3

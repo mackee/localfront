@@ -1,0 +1,47 @@
+# runn scenario verifying the static-and-api example end to end.
+#
+#   LF_ENDPOINT=http://127.0.0.1:8080 runn run examples/static-and-api/scenario.yaml
+#
+# Driven by `task verify:static-and-api`, which brings up the object store and
+# the API backend (docker compose), seeds the store, starts localfront, then
+# runs this scenario.
+desc: static-and-api example — static assets from S3, /api/* routed to the HTTP backend
+labels:
+  - localfront
+  - examples
+runners:
+  req:
+    endpoint: ${LF_ENDPOINT:-http://127.0.0.1:8080}
+steps:
+  static_root:
+    desc: the default root object is served from S3
+    req:
+      /:
+        get:
+          headers:
+            Host: site.example.test
+          body: null
+    test: |
+      current.res.status == 200 && indexOf(current.res.rawBody, "Static site served from S3") != -1
+  api_path:
+    desc: a request under /api/* is routed to the HTTP backend (first match wins)
+    req:
+      /api/ping:
+        get:
+          headers:
+            Host: site.example.test
+          body: null
+    test: |
+      current.res.status == 200 && indexOf(current.res.rawBody, "api-backend") != -1
+  api_post:
+    desc: the /api/* behavior allows POST and forwards the body
+    req:
+      /api/submit:
+        post:
+          headers:
+            Host: site.example.test
+          body:
+            application/json:
+              hello: world
+    test: |
+      current.res.status == 200

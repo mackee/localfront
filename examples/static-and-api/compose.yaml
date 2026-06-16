@@ -1,0 +1,42 @@
+# Dependencies for the static-and-api example: an S3-compatible object store
+# (RustFS) for the static assets, seeded from ./public, plus a small HTTP
+# backend standing in for the /api/* origin. localfront runs on the host.
+#
+# `task verify:static-and-api` automates the flow and runs scenario.yaml.
+name: localfront-static-and-api
+
+services:
+  rustfs:
+    image: ${LOCALFRONT_E2E_S3_IMAGE:-rustfs/rustfs:latest}
+    environment:
+      RUSTFS_ACCESS_KEY: rustfsadmin
+      RUSTFS_SECRET_KEY: rustfsadmin
+      MINIO_ROOT_USER: rustfsadmin
+      MINIO_ROOT_PASSWORD: rustfsadmin
+    ports:
+      - "9000:9000"
+
+  # Stand-in API backend for the /api/* cache behavior.
+  backend:
+    image: hashicorp/http-echo:latest
+    command: ["-text=api-backend", "-listen=:3000"]
+    ports:
+      - "3000:3000"
+
+  # One-shot uploader (excluded from `up` by its profile; run explicitly).
+  seed:
+    image: minio/mc:latest
+    profiles: [seed]
+    depends_on: [rustfs]
+    volumes:
+      - ./public:/assets:ro
+    entrypoint:
+      - sh
+      - -c
+      - |
+        until mc alias set local http://rustfs:9000 rustfsadmin rustfsadmin && mc ls local >/dev/null 2>&1; do
+          echo "waiting for the object store..."; sleep 1;
+        done
+        mc mb local/site-assets 2>/dev/null || true
+        mc cp --recursive /assets/ local/site-assets/
+        echo "seeded site-assets"

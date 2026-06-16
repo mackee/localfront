@@ -1,0 +1,54 @@
+# Taskfile for localfront. https://taskfile.dev
+# Install the runner (and other dev tools) with: aqua i
+version: '3'
+
+vars:
+  BIN: bin/localfront
+
+tasks:
+  default:
+    cmds:
+      - task: build
+
+  build:
+    desc: Build the localfront binary
+    cmds:
+      - go build -o {{.BIN}} ./cmd/localfront
+
+  test:
+    desc: Run unit tests
+    cmds:
+      - go test ./...
+
+  e2e:
+    desc: Run integration tests (Docker S3 scenarios and runn examples skip when unavailable)
+    cmds:
+      - go test -tags e2e ./e2e/...
+
+  lint:
+    desc: Run golangci-lint
+    cmds:
+      - golangci-lint run
+
+  clean:
+    desc: Remove build output
+    cmds:
+      - rm -rf bin
+
+  verify:spa:
+    desc: Verify the spa-hosting example with docker-compose + runn
+    deps: [build]
+    cmds:
+      - scripts/verify-example.sh spa-hosting spa.example.test
+
+  verify:static-and-api:
+    desc: Verify the static-and-api example with docker-compose + runn
+    deps: [build]
+    cmds:
+      - scripts/verify-example.sh static-and-api site.example.test
+
+  verify:examples:
+    desc: Verify every docker-compose-backed example
+    cmds:
+      - task: verify:spa
+      - task: verify:static-and-api

@@ -1,0 +1,68 @@
+# CloudFront Functions: URL normalization, a legacy-path redirect, and a
+# KeyValueStore feature flag.
+#
+#   localfront serve --template examples/functions/template.yaml \
+#     --kvs-seed feature-flags=examples/functions/flags.json
+#
+# (No object store is needed — this example proxies to a local HTTP origin on
+# 127.0.0.1:3000. Point it at any server you like.)
+Resources:
+  FeatureFlags:
+    Type: AWS::CloudFront::KeyValueStore
+    Properties:
+      Name: feature-flags
+
+  Router:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: router
+      FunctionConfig:
+        Runtime: cloudfront-js-2.0
+        Comment: URL normalization, redirect, and a feature flag
+        KeyValueStoreAssociations:
+          - KeyValueStoreARN: !GetAtt FeatureFlags.Arn
+      FunctionCode: |
+        import cf from 'cloudfront';
+        var kvs = cf.kvs();
+        async function handler(event) {
+          var req = event.request;
+          // Permanent redirect for a retired path.
+          if (req.uri === '/old-home') {
+            return {
+              statusCode: 301,
+              statusDescription: 'Moved Permanently',
+              headers: { location: { value: '/' } },
+            };
+          }
+          // Directory requests resolve to index.html.
+          if (req.uri.slice(-1) === '/') {
+            req.uri += 'index.html';
+          }
+          // Expose a feature flag to the origin.
+          var variant = 'control';
+          try { variant = await kvs.get('homepage-variant'); } catch (e) {}
+          req.headers['x-variant'] = { value: variant };
+          return req;
+        }
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Aliases:
+          - app.example.test
+        Origins:
+          - Id: app
+            DomainName: 127.0.0.1
+            CustomOriginConfig:
+              HTTPPort: 3000
+              OriginProtocolPolicy: http-only
+        DefaultCacheBehavior:
+          TargetOriginId: app
+          ViewerProtocolPolicy: allow-all
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad   # CachingDisabled
+          OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3  # AllViewer
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt Router.FunctionARN
