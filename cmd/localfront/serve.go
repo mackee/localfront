@@ -29,7 +29,7 @@ func serve(ctx context.Context, opts *serveOptions, logger *slog.Logger) error {
 	if opts.s3Endpoint != "" {
 		client, err := origin.NewS3Client(opts.s3Endpoint, opts.s3Region, opts.s3Access, opts.s3Secret, nil)
 		if err != nil {
-			return err
+			return fmt.Errorf("configuring object store client for %s: %w", opts.s3Endpoint, err)
 		}
 		s3Client = client
 		dpOpts = append(dpOpts, dataplane.WithS3Fetcher(client))
@@ -59,7 +59,7 @@ func serve(ctx context.Context, opts *serveOptions, logger *slog.Logger) error {
 	}
 	listener, err := net.Listen("tcp", opts.listen)
 	if err != nil {
-		return err
+		return fmt.Errorf("listening on %s: %w", opts.listen, err)
 	}
 
 	go watchFiles(ctx, opts, rl, logger)
@@ -77,10 +77,10 @@ func serve(ctx context.Context, opts *serveOptions, logger *slog.Logger) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
-			return err
+			return fmt.Errorf("shutting down http server: %w", err)
 		}
 		if err := <-errc; !errors.Is(err, http.ErrServerClosed) {
-			return err
+			return fmt.Errorf("http server: %w", err)
 		}
 		return nil
 	}
@@ -93,13 +93,13 @@ func loadConfig(opts *serveOptions, logger *slog.Logger) (*config.Config, error)
 	for _, path := range opts.templates {
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("reading template %s: %w", path, err)
 		}
 		sources = append(sources, cfntmpl.Source{Name: path, Data: data})
 	}
 	cfg, err := config.Load(sources, opts.parameters)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("loading templates: %w", err)
 	}
 	for _, warning := range cfg.Warnings {
 		logger.Warn(warning)

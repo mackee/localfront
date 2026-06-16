@@ -185,7 +185,7 @@ func loadKVSImportSource(ctx context.Context, s3 origin.Fetcher, arn string) (ma
 func loadKVSSeedFile(path string) (map[string]string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading seed file %s: %w", path, err)
 	}
 	return cffunc.ParseSeed(raw)
 }
