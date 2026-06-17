@@ -27,9 +27,10 @@ type Server struct {
 	snap      atomic.Pointer[snapshot]
 	transport http.RoundTripper
 	s3        origin.Fetcher
-	// publicHost is the host (optionally host:port) signed URLs were generated
-	// for, used verbatim to verify canned-policy signatures. Empty means: use
-	// the viewer's Host header as received (see sign.Verify).
+	// publicHost is the host (optionally host:port) used as the resource host in
+	// signed URL/cookie verification: canned-policy reconstruction and
+	// custom-policy Resource host matching. Empty means: use the viewer's Host
+	// header as received (see sign.Verify).
 	publicHost string
 	// accessLog emits one CloudFront Standard log line per completed request.
 	// Nil disables access logging; the wrapping in ServeHTTP becomes a no-op.
@@ -69,9 +70,10 @@ func WithS3Fetcher(f origin.Fetcher) Option {
 	return func(s *Server) { s.s3 = f }
 }
 
-// WithPublicHost sets the host (optionally host:port) that signed URLs were
-// generated for, used verbatim when verifying canned-policy signatures. Leave
-// it empty to derive the host from each request's Host header as received.
+// WithPublicHost sets the host (optionally host:port) used as the resource host
+// in signed URL/cookie verification (canned reconstruction and custom-policy
+// Resource host matching). Leave it empty to derive the host from each
+// request's Host header as received.
 func WithPublicHost(host string) Option {
 	return func(s *Server) { s.publicHost = host }
 }

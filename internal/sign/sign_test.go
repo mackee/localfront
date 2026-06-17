@@ -307,6 +307,67 @@ func TestVerify_CustomURL_ResourceMismatch(t *testing.T) {
 	}
 }
 
+// A custom-policy Resource with a wildcard host covers any matching subdomain
+// (the wildcard-subdomain case): the host is enforced, not only the path.
+func TestVerify_CustomURL_WildcardHost(t *testing.T) {
+	priv, trusted := testKey(t)
+	signer := awssign.NewURLSigner(keyPairID, priv)
+	policy := &awssign.Policy{Statements: []awssign.Statement{{
+		Resource: "https://*.tenants.example.test/private/*",
+		Condition: awssign.Condition{
+			DateLessThan: awssign.NewAWSEpochTime(time.Now().Add(time.Hour)),
+		},
+	}}}
+	signed, err := signer.SignWithPolicy("https://alice.tenants.example.test/private/secret.txt", policy)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	if err := sign.Verify(requestFromSignedURL(signed), trusted, time.Now(), "", ""); err != nil {
+		t.Errorf("a request whose host matches the wildcard resource host should verify, got: %v", err)
+	}
+}
+
+// The host in a custom-policy Resource is enforced: a request whose host falls
+// outside the Resource's host pattern is rejected even when the path matches.
+func TestVerify_CustomURL_HostMismatch(t *testing.T) {
+	priv, trusted := testKey(t)
+	signer := awssign.NewURLSigner(keyPairID, priv)
+	policy := &awssign.Policy{Statements: []awssign.Statement{{
+		Resource: "https://*.tenants.example.test/private/*",
+		Condition: awssign.Condition{
+			DateLessThan: awssign.NewAWSEpochTime(time.Now().Add(time.Hour)),
+		},
+	}}}
+	// Signed for a host outside the *.tenants.example.test pattern; the path matches.
+	signed, err := signer.SignWithPolicy("https://other.example.com/private/secret.txt", policy)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	if err := sign.Verify(requestFromSignedURL(signed), trusted, time.Now(), "", ""); err == nil {
+		t.Error("a request whose host is outside the signed resource host should be rejected")
+	}
+}
+
+// A path-only Resource (no scheme/host) keeps matching the path regardless of
+// host: signers that scope by path alone are unaffected by host enforcement.
+func TestVerify_CustomURL_PathOnlyResource(t *testing.T) {
+	priv, trusted := testKey(t)
+	signer := awssign.NewURLSigner(keyPairID, priv)
+	policy := &awssign.Policy{Statements: []awssign.Statement{{
+		Resource: "/private/*",
+		Condition: awssign.Condition{
+			DateLessThan: awssign.NewAWSEpochTime(time.Now().Add(time.Hour)),
+		},
+	}}}
+	signed, err := signer.SignWithPolicy("https://anything.example.test/private/secret.txt", policy)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	if err := sign.Verify(requestFromSignedURL(signed), trusted, time.Now(), "", ""); err != nil {
+		t.Errorf("a path-only resource should verify regardless of host, got: %v", err)
+	}
+}
+
 func TestVerify_CustomURL_IPAddress(t *testing.T) {
 	priv, trusted := testKey(t)
 	signer := awssign.NewURLSigner(keyPairID, priv)
