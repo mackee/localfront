@@ -47,8 +47,15 @@ tasks:
     cmds:
       - scripts/verify-example.sh static-and-api site.example.test
 
+  verify:wildcard-subdomain-s3:
+    desc: Verify the wildcard-subdomain-s3 example with docker-compose + runn
+    deps: [build]
+    cmds:
+      - scripts/verify-example.sh wildcard-subdomain-s3 alice.tenants.example.test
+
   verify:examples:
     desc: Verify every docker-compose-backed example
     cmds:
       - task: verify:spa
       - task: verify:static-and-api
+      - task: verify:wildcard-subdomain-s3

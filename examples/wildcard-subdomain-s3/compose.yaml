@@ -1,0 +1,35 @@
+# Dependencies for the wildcard-subdomain-s3 example: an S3-compatible object
+# store (RustFS) seeded with one folder per tenant from ./sites. localfront
+# itself runs on the host (see template.yaml header).
+#
+# `task verify:wildcard-subdomain-s3` automates the flow and runs scenario.yaml.
+name: localfront-wildcard-subdomain-s3
+
+services:
+  rustfs:
+    image: ${LOCALFRONT_E2E_S3_IMAGE:-rustfs/rustfs:latest}
+    environment:
+      RUSTFS_ACCESS_KEY: rustfsadmin
+      RUSTFS_SECRET_KEY: rustfsadmin
+      MINIO_ROOT_USER: rustfsadmin
+      MINIO_ROOT_PASSWORD: rustfsadmin
+    ports:
+      - "9000:9000"
+
+  # One-shot uploader (excluded from `up` by its profile; run explicitly).
+  seed:
+    image: minio/mc:latest
+    profiles: [seed]
+    depends_on: [rustfs]
+    volumes:
+      - ./sites:/assets:ro
+    entrypoint:
+      - sh
+      - -c
+      - |
+        until mc alias set local http://rustfs:9000 rustfsadmin rustfsadmin && mc ls local >/dev/null 2>&1; do
+          echo "waiting for the object store..."; sleep 1;
+        done
+        mc mb local/tenant-sites 2>/dev/null || true
+        mc cp --recursive /assets/ local/tenant-sites/
+        echo "seeded tenant-sites"

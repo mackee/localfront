@@ -63,11 +63,13 @@ func deny(format string, args ...any) error {
 // defaultRootObject is the distribution's root object: a request for the root is
 // served (and was signed) as that object, so it is resolved before matching.
 //
-// publicHost is the host (optionally host:port) a canned-policy resource was
-// signed for. It is used verbatim — including any port — to reconstruct the
-// resource, because the canned signature covers the exact resource URL the
-// signer produced (this mirrors CloudFront, which compares against the request
-// URL as received). When empty it falls back to the request's Host header.
+// publicHost is the host (optionally host:port) used as the resource authority
+// when matching the signed resource: a canned policy's resource is
+// reconstructed against it (verbatim, including any port, since the canned
+// signature covers the exact resource URL the signer produced), and a custom
+// policy's Resource host is matched against it. When empty it falls back to the
+// request's Host header — the wildcard-subdomain case, where each tenant
+// arrives on its own host.
 func Verify(r *http.Request, trusted []Key, now time.Time, defaultRootObject, publicHost string) error {
 	c, err := extractCredentials(r)
 	if err != nil {
@@ -83,16 +85,16 @@ func Verify(r *http.Request, trusted []Key, now time.Time, defaultRootObject, pu
 	}
 
 	if c.policy != "" {
-		return verifyCustom(r, key, c.policy, sig, now, defaultRootObject)
+		return verifyCustom(r, key, c.policy, sig, now, defaultRootObject, publicHost)
 	}
 	return verifyCanned(r, key, c.expires, sig, now, defaultRootObject, resourceHost(r, publicHost))
 }
 
-// resourceHost returns the authority used to reconstruct a canned-policy
-// resource. An explicit publicHost (from --public-host) is used verbatim;
-// otherwise the request's Host header is used as received. Either way the port,
-// if present, is part of the resource — the canned signature covers the exact
-// URL the signer produced.
+// resourceHost returns the authority used when matching the signed resource:
+// reconstructing a canned-policy resource, and matching a custom-policy
+// Resource's host. An explicit publicHost (from --public-host) is used
+// verbatim; otherwise the request's Host header is used as received. Either way
+// the port, if present, is part of the resource.
 func resourceHost(r *http.Request, publicHost string) string {
 	if publicHost != "" {
 		return publicHost
@@ -198,7 +200,7 @@ func verifyCanned(r *http.Request, key *rsa.PublicKey, expires string, sig []byt
 
 // verifyCustom validates a custom policy: the signature covers the decoded
 // policy document verbatim, and its conditions are then enforced.
-func verifyCustom(r *http.Request, key *rsa.PublicKey, policyParam string, sig []byte, now time.Time, defaultRootObject string) error {
+func verifyCustom(r *http.Request, key *rsa.PublicKey, policyParam string, sig []byte, now time.Time, defaultRootObject, publicHost string) error {
 	jsonPolicy, err := awsBase64Decode(policyParam)
 	if err != nil {
 		return deny("malformed Policy")
@@ -225,7 +227,7 @@ func verifyCustom(r *http.Request, key *rsa.PublicKey, policyParam string, sig [
 	// policy Resource; net/http has already decoded r.URL.Path, which would
 	// reject a valid request for a resource whose path contains escaped bytes
 	// (the canned path uses EscapedPath for the same reason).
-	if !resourceMatches(stmt.resource, applyDefaultRootObject(r.URL.EscapedPath(), defaultRootObject)) {
+	if !resourceMatches(stmt.resource, resourceHost(r, publicHost), applyDefaultRootObject(r.URL.EscapedPath(), defaultRootObject)) {
 		return deny("the request does not match the signed resource")
 	}
 	return nil
@@ -362,30 +364,34 @@ func checkIP(cidr, remoteAddr string) error {
 	return nil
 }
 
-// resourceMatches checks the request path against the policy resource pattern.
-// The scheme and host of the resource are ignored (localfront cannot know the
-// scheme the signer used); only the path, with CloudFront's * and ? wildcards,
-// is enforced.
-func resourceMatches(resource, path string) bool {
+// resourceMatches checks the request against the policy resource pattern,
+// honoring CloudFront's '*' and '?' wildcards. When the Resource carries a
+// scheme://host, the host is enforced as well: a Resource like
+// "https://*.tenants.example.com/*" only covers requests whose host matches
+// (host is resourceHost(r, publicHost) — the viewer host, or --public-host when
+// set). The viewer's scheme is not observable behind TLS termination, so both
+// https and http are tried, the same relaxation the canned path makes. A
+// path-only Resource (no scheme/host) constrains the path alone.
+func resourceMatches(resource, host, path string) bool {
 	if resource == "" || resource == "*" {
 		return true
 	}
-	pattern := resource
-	if i := strings.Index(resource, "://"); i >= 0 {
-		rest := resource[i+3:]
-		if slash := strings.IndexByte(rest, '/'); slash >= 0 {
-			pattern = rest[slash:]
-		} else {
-			pattern = "/"
-		}
-	}
 	// Drop the query string: only the path part is matched (fidelity note 15).
 	// An SDK-signed Resource such as ".../video.mp4?foo=bar" must still match the
-	// request path, which net/http exposes without the query.
+	// request, which net/http exposes without the query.
+	pattern := resource
 	if q := strings.IndexByte(pattern, '?'); q >= 0 {
 		pattern = pattern[:q]
 	}
-	return matchGlob(pattern, path)
+	if !strings.Contains(pattern, "://") {
+		return matchGlob(pattern, path)
+	}
+	for _, scheme := range []string{"https", "http"} {
+		if matchGlob(pattern, scheme+"://"+host+path) {
+			return true
+		}
+	}
+	return false
 }
 
 // awsBase64Decode reverses CloudFront's URL-safe base64 substitution and

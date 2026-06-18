@@ -1,0 +1,65 @@
+# runn scenario verifying the wildcard-subdomain-s3 example end to end.
+#
+#   LF_ENDPOINT=http://127.0.0.1:8080 runn run examples/wildcard-subdomain-s3/scenario.yaml
+#
+# Driven by `task verify:wildcard-subdomain-s3`, which brings up the object
+# store (docker compose), seeds it with one folder per tenant, starts localfront
+# on the host, then runs this scenario.
+desc: wildcard-subdomain-s3 example — one bucket, per-subdomain folder routing via a CloudFront Function
+labels:
+  - localfront
+  - examples
+runners:
+  req:
+    endpoint: ${LF_ENDPOINT:-http://127.0.0.1:8080}
+steps:
+  alice_root:
+    desc: alice's subdomain serves alice's folder
+    req:
+      /:
+        get:
+          headers:
+            Host: alice.tenants.example.test
+          body: null
+    test: |
+      current.res.status == 200 && indexOf(current.res.rawBody, "tenant: alice") != -1
+  bob_root:
+    desc: bob's subdomain serves bob's folder
+    req:
+      /:
+        get:
+          headers:
+            Host: bob.tenants.example.test
+          body: null
+    test: |
+      current.res.status == 200 && indexOf(current.res.rawBody, "tenant: bob") != -1
+  carol_root:
+    desc: carol's subdomain serves carol's folder
+    req:
+      /:
+        get:
+          headers:
+            Host: carol.tenants.example.test
+          body: null
+    test: |
+      current.res.status == 200 && indexOf(current.res.rawBody, "tenant: carol") != -1
+  nested_asset:
+    desc: a nested asset path is prefixed with the tenant folder
+    req:
+      /assets/app.js:
+        get:
+          headers:
+            Host: alice.tenants.example.test
+          body: null
+    test: |
+      current.res.status == 200 && indexOf(current.res.headers["Content-Type"][0], "javascript") != -1 && indexOf(current.res.rawBody, "alice asset") != -1
+  isolation:
+    desc: alice's host never serves another tenant's content
+    req:
+      /:
+        get:
+          headers:
+            Host: alice.tenants.example.test
+          body: null
+    test: |
+      indexOf(current.res.rawBody, "tenant: bob") == -1 && indexOf(current.res.rawBody, "tenant: carol") == -1

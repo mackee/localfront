@@ -35,7 +35,7 @@ type cli struct {
 type serveCmd struct {
 	Templates  []string          `name:"template" required:"" env:"LOCALFRONT_TEMPLATE" placeholder:"FILE" help:"CloudFormation template file (JSON or YAML); repeatable. Env: comma-separated list."`
 	Listen     string            `name:"listen" default:":8080" env:"LOCALFRONT_LISTEN" placeholder:"ADDR" help:"Address for the data plane to listen on."`
-	PublicHost string            `name:"public-host" required:"" env:"LOCALFRONT_PUBLIC_HOST" placeholder:"HOST[:PORT]" help:"Host (optionally host:port) localfront is reached at; canned signed URLs are verified against it verbatim."`
+	PublicHost string            `name:"public-host" required:"" env:"LOCALFRONT_PUBLIC_HOST" placeholder:"HOST[:PORT]" help:"Resource host (optionally host:port) for signed URL/cookie verification: a canned policy's resource is reconstructed against it, and a custom policy's Resource host is matched against it. Empty uses each request's Host (the wildcard-subdomain case)."`
 	S3Endpoint string            `name:"s3-endpoint" env:"LOCALFRONT_S3_ENDPOINT" placeholder:"URL" help:"Endpoint URL of the S3-compatible object store backing S3 origins."`
 	S3Region   string            `name:"s3-region" default:"us-east-1" env:"LOCALFRONT_S3_REGION" placeholder:"REGION" help:"Region used to sign requests to the object store."`
 	S3Access   string            `name:"s3-access-key" env:"LOCALFRONT_S3_ACCESS_KEY" placeholder:"KEY" help:"Access key for the object store."`

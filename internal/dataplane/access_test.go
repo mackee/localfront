@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mackee/localfront/internal/accesslog"
 	"github.com/mackee/localfront/internal/cffunc"
@@ -26,14 +27,28 @@ func readLogLines(t *testing.T, buf *bytes.Buffer) []string {
 	return strings.Split(out, "\n")
 }
 
-func newAccessSrv(t *testing.T, dist *config.Distribution, buf *bytes.Buffer) *dataplane.Server {
+func newAccessSrv(t *testing.T, dist *config.Distribution, buf *bytes.Buffer, opts ...dataplane.Option) *dataplane.Server {
 	t.Helper()
 	w, err := accesslog.NewWriter(buf)
 	if err != nil {
 		t.Fatalf("accesslog.NewWriter: %v", err)
 	}
 	cfg := &config.Config{Distributions: []*config.Distribution{dist}}
-	return dataplane.New(cfg, newLogger(), dataplane.WithAccessLog(w))
+	return dataplane.New(cfg, newLogger(), append([]dataplane.Option{dataplane.WithAccessLog(w)}, opts...)...)
+}
+
+// steppingClock returns a clock that advances by step on every call, so a
+// request's access-log timestamps (start → first byte → end) are strictly
+// increasing and the resulting time-taken / time-to-first-byte are
+// deterministically non-zero, regardless of how fast the machine runs the
+// request. For single-request tests; the counter is not concurrency-safe.
+func steppingClock(step time.Duration) func() time.Time {
+	base := time.Unix(1_700_000_000, 0).UTC()
+	var n int64
+	return func() time.Time {
+		n++
+		return base.Add(time.Duration(n) * step)
+	}
 }
 
 // TestAccessLog_SuccessfulProxy covers the happy path: an origin replies with
@@ -50,7 +65,9 @@ func TestAccessLog_SuccessfulProxy(t *testing.T) {
 	dist := baseDistribution("D1", "d1.cloudfront.localhost", []string{"assets.example.test"}, origin)
 
 	var buf bytes.Buffer
-	srv := newAccessSrv(t, dist, &buf)
+	// Deterministic clock so time-taken / TTFB are non-zero even when the
+	// in-process origin replies in well under the log's millisecond resolution.
+	srv := newAccessSrv(t, dist, &buf, dataplane.WithClock(steppingClock(time.Millisecond)))
 
 	req := httptest.NewRequest(http.MethodGet, "http://assets.example.test/index.html?token=abc", nil)
 	req.Host = "assets.example.test"

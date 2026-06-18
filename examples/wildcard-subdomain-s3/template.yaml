@@ -1,0 +1,63 @@
+# Wildcard subdomain -> single S3 bucket subfolder, via a CloudFront Function.
+#
+# One distribution serves every tenant: the wildcard alias
+# *.tenants.example.test accepts any subdomain, and the viewer-request function
+# rewrites the request path into that tenant's folder in one shared bucket:
+#
+#   https://alice.tenants.example.test/          -> s3://tenant-sites/alice/index.html
+#   https://bob.tenants.example.test/assets/x.js -> s3://tenant-sites/bob/assets/x.js
+#
+# Run locally (object store on :9000, localfront on the host):
+#   docker compose -f examples/wildcard-subdomain-s3/compose.yaml up -d
+#   docker compose -f examples/wildcard-subdomain-s3/compose.yaml run --rm seed
+#   localfront serve --template examples/wildcard-subdomain-s3/template.yaml \
+#     --public-host 127.0.0.1:8080 \
+#     --s3-endpoint http://localhost:9000 \
+#     --s3-access-key rustfsadmin --s3-secret-key rustfsadmin
+#
+# `task verify:wildcard-subdomain-s3` automates the whole flow with runn.
+Resources:
+  SubdomainRouter:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: subdomain-router
+      FunctionConfig:
+        Runtime: cloudfront-js-2.0
+        Comment: Route the leftmost Host label to a same-named folder in one bucket
+      FunctionCode: |
+        function handler(event) {
+          var req = event.request;
+          // The viewer Host arrives lowercased as headers.host, e.g.
+          // "alice.tenants.example.test". The leftmost label is the tenant.
+          var tenant = req.headers.host.value.split('.')[0];
+          // Directory requests (and "/") resolve to index.html: DefaultRootObject
+          // only applies to the distribution root, not to per-tenant subfolders.
+          var uri = req.uri;
+          if (uri.charAt(uri.length - 1) === '/') {
+            uri += 'index.html';
+          }
+          // Prefix the tenant folder: "/assets/x.js" -> "/alice/assets/x.js".
+          req.uri = '/' + tenant + uri;
+          return req;
+        }
+
+  WildcardDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Aliases:
+          # One wildcard alias fans every tenant subdomain into this distribution.
+          - "*.tenants.example.test"
+        Origins:
+          - Id: s3
+            DomainName: tenant-sites.s3.us-east-1.amazonaws.com
+            S3OriginConfig: {}
+        DefaultCacheBehavior:
+          TargetOriginId: s3
+          ViewerProtocolPolicy: allow-all
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # Managed-CachingOptimized
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt SubdomainRouter.FunctionARN
