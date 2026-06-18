@@ -27,6 +27,10 @@ type Server struct {
 	snap      atomic.Pointer[snapshot]
 	transport http.RoundTripper
 	s3        origin.Fetcher
+	// now returns the current time, read for access-log timing (request start,
+	// first byte, end). Defaults to time.Now (set in New); tests override it for
+	// deterministic durations.
+	now func() time.Time
 	// publicHost is the host (optionally host:port) used as the resource host in
 	// signed URL/cookie verification: canned-policy reconstruction and
 	// custom-policy Resource host matching. Empty means: use the viewer's Host
@@ -78,6 +82,14 @@ func WithPublicHost(host string) Option {
 	return func(s *Server) { s.publicHost = host }
 }
 
+// WithClock overrides the clock the data plane reads for access-log timing
+// (request start, first byte, end). Defaults to time.Now; tests inject a
+// deterministic clock so time-taken / time-to-first-byte do not depend on how
+// fast the machine completes a request.
+func WithClock(now func() time.Time) Option {
+	return func(s *Server) { s.now = now }
+}
+
 // WithAccessLog directs per-request access logs (CloudFront Standard format)
 // at the given writer. Pass nil to disable logging.
 func WithAccessLog(w *accesslog.Writer) Option {
@@ -89,6 +101,7 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) *Server {
 	s := &Server{
 		logger:    logger,
 		transport: newTransport(),
+		now:       time.Now,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -174,10 +187,10 @@ func (t *routeTable) match(host string) *config.Distribution {
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	requestID := newRequestID()
-	start := time.Now()
+	start := s.now()
 	var rec *accessRecorder
 	if s.accessLog != nil {
-		rec = newAccessRecorder(w, start, r.Proto)
+		rec = newAccessRecorder(w, start, r.Proto, s.now)
 		rec.wrapRequestBody(r)
 		w = rec
 	}

@@ -27,6 +27,7 @@ type accessRecorder struct {
 	requestBytes      *countingReadCloser
 	wroteFirstAt      bool
 	functionGenerated bool
+	now               func() time.Time
 }
 
 // markFunctionGenerated records that a CloudFront Function short-circuited the
@@ -40,12 +41,18 @@ func (r *accessRecorder) markFunctionGenerated() {
 }
 
 // newAccessRecorder wraps w so ServeHTTP can read back the response bytes,
-// status, and first-byte time at the end of the request.
-func newAccessRecorder(w http.ResponseWriter, start time.Time, protoVersion string) *accessRecorder {
+// status, and first-byte time at the end of the request. now is the clock used
+// for the first-byte timestamp (the same one the server times start/end with);
+// a nil now falls back to time.Now.
+func newAccessRecorder(w http.ResponseWriter, start time.Time, protoVersion string, now func() time.Time) *accessRecorder {
+	if now == nil {
+		now = time.Now
+	}
 	return &accessRecorder{
 		ResponseWriter: w,
 		requestStart:   start,
 		protoVersion:   protoVersion,
+		now:            now,
 	}
 }
 
@@ -67,7 +74,7 @@ func (r *accessRecorder) WriteHeader(status int) {
 	r.status = status
 	r.headerBytes = estimateResponseHeaderBytes(status, r.protoVersion, r.Header())
 	if !r.wroteFirstAt {
-		r.firstByteAt = time.Now()
+		r.firstByteAt = r.now()
 		r.wroteFirstAt = true
 	}
 	r.ResponseWriter.WriteHeader(status)
@@ -78,7 +85,7 @@ func (r *accessRecorder) Write(p []byte) (int, error) {
 		r.WriteHeader(http.StatusOK)
 	}
 	if !r.wroteFirstAt {
-		r.firstByteAt = time.Now()
+		r.firstByteAt = r.now()
 		r.wroteFirstAt = true
 	}
 	n, err := r.ResponseWriter.Write(p)
@@ -299,7 +306,7 @@ func (s *Server) emitAccessLog(r *http.Request, rec *accessRecorder, dist *confi
 	if s.accessLog == nil || rec == nil {
 		return
 	}
-	entry := buildAccessEntry(r, rec, dist, requestID, time.Now())
+	entry := buildAccessEntry(r, rec, dist, requestID, s.now())
 	s.accessLog.Write(entry)
 }
 
