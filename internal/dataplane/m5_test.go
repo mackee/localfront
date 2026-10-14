@@ -146,6 +146,121 @@ function handler(event) {
 	}
 }
 
+// The response headers policy is applied before the viewer-response event, so
+// the function sees (and may change or drop) the policy's result.
+func TestM5_ResponseHeadersPolicyBeforeViewerResponse(t *testing.T) {
+	_, host, port := newTestOriginServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Keep", "origin")
+		w.Header().Set("X-Remove", "origin")
+		_, _ = io.WriteString(w, "body")
+	})
+
+	tests := []struct {
+		name string
+		code string
+		want map[string]string // "" means the header must be absent
+	}{
+		{
+			name: "function sees policy header",
+			code: `function handler(event) {
+				event.response.headers['x-seen'] = {
+					value: event.response.headers['x-policy'].value
+				};
+				return event.response;
+			}`,
+			want: map[string]string{"X-Policy": "policy", "X-Seen": "policy"},
+		},
+		{
+			name: "function overrides policy header",
+			code: `function handler(event) {
+				event.response.headers['x-policy'] = { value: 'function' };
+				return event.response;
+			}`,
+			want: map[string]string{"X-Policy": "function", "X-Seen": ""},
+		},
+		{
+			name: "function sees origin value kept by Override=false",
+			code: `function handler(event) {
+				event.response.headers['x-seen'] = {
+					value: event.response.headers['x-keep'].value
+				};
+				return event.response;
+			}`,
+			want: map[string]string{"X-Keep": "origin", "X-Seen": "origin"},
+		},
+		{
+			name: "function does not see removed header",
+			code: `function handler(event) {
+				event.response.headers['x-seen'] = {
+					value: event.response.headers['x-remove'] ? 'present' : 'removed'
+				};
+				return event.response;
+			}`,
+			want: map[string]string{"X-Remove": "", "X-Seen": "removed"},
+		},
+		{
+			name: "function can re-add removed header",
+			code: `function handler(event) {
+				event.response.headers['x-remove'] = { value: 'function' };
+				return event.response;
+			}`,
+			want: map[string]string{"X-Remove": "function", "X-Policy": "policy"},
+		},
+		{
+			name: "fresh response object drops policy headers",
+			code: `function handler(event) {
+				return { statusCode: 200, headers: { 'x-a': { value: '1' } } };
+			}`,
+			want: map[string]string{"X-A": "1", "X-Policy": "", "X-Keep": ""},
+		},
+		{
+			name: "policy without function",
+			want: map[string]string{"X-Policy": "policy", "X-Keep": "origin", "X-Remove": "", "X-Seen": ""},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			o := customOrigin("o1", host, port)
+			beh := getHeadBehavior(o, "")
+			beh.ResponseHeadersPolicy = &config.ResponseHeadersPolicy{
+				CustomHeaders: []config.CustomHeader{
+					{Name: "X-Policy", Value: "policy", Override: true},
+					{Name: "X-Keep", Value: "policy", Override: false},
+				},
+				RemoveHeaders: []string{"X-Remove"},
+			}
+			dist := &config.Distribution{
+				LogicalID: "D1", ID: "D1", DomainName: "d1.cloudfront.localhost",
+				Aliases: []string{"site.example.test"}, Enabled: true,
+				Origins: []*config.Origin{o}, DefaultBehavior: beh,
+			}
+			cfg := &config.Config{Distributions: []*config.Distribution{dist}}
+			funcs := map[string]*cffunc.Function{}
+			if tt.code != "" {
+				beh.ViewerResponse = &config.Function{LogicalID: "Resp", Name: "resp"}
+				funcs["Resp"] = mustCompileFn(t, "resp", tt.code, nil)
+			}
+			srv := dataplane.New(cfg, newLogger())
+			srv.Swap(cfg, funcs)
+
+			req := httptest.NewRequest(http.MethodGet, "http://site.example.test/", nil)
+			req.Host = "site.example.test"
+			rr := httptest.NewRecorder()
+			srv.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rr.Code)
+			}
+			for name, want := range tt.want {
+				if got := rr.Header().Get(name); got != want {
+					t.Errorf("%s = %q, want %q", name, got, want)
+				}
+			}
+		})
+	}
+}
+
 // CloudFront Functions are not invoked for origin responses with a 4xx/5xx
 // status, so the viewer-response function must not run on an origin error.
 func TestM5_ViewerResponse_SkippedOnOriginError(t *testing.T) {

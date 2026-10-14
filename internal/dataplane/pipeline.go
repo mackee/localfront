@@ -40,7 +40,7 @@ var alwaysForwardedHeaders = []string{
 
 // serve runs the request pipeline for a resolved distribution and behavior:
 // the viewer-request function, the origin request build and fetch, custom error
-// responses, the viewer-response function, the response headers policy, and
+// responses, the response headers policy, the viewer-response function, and
 // compression, then writes the response with CloudFront headers.
 func (s *Server) serve(w http.ResponseWriter, r *http.Request, dist *config.Distribution, beh *config.Behavior, snap *snapshot, requestID string) {
 	// Signed URL / cookie verification for behaviors with trusted key groups.
@@ -77,7 +77,8 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, dist *config.Dist
 		}
 	}
 
-	if resp == nil {
+	fromOrigin := resp == nil
+	if fromOrigin {
 		// Behavior is intentionally NOT re-evaluated after a function rewrites
 		// the URI (CloudFront runs functions after behavior selection).
 		originReq := behavior.BuildOriginRequest(beh, r, viewerHeaders)
@@ -90,19 +91,19 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, dist *config.Dist
 			resp.close()
 			resp = applied
 		}
-		// CloudFront Functions are not invoked for origin responses with a 4xx/5xx
-		// status, so skip the viewer-response function unless a custom error
-		// response above already rewrote the status below 400.
-		if beh.ViewerResponse != nil && resp.statusCode < 400 {
-			if !s.runViewerResponse(w, r, dist, beh, snap, viewerHeaders, resp, requestID) {
-				resp.close()
-				return // a 503 was already written
-			}
-		}
 	}
 	defer func() { resp.close() }()
 
 	behavior.ApplyResponseHeaders(beh, resp.header, r.Header.Get("Origin"))
+	// Policy headers are visible to the viewer-response function, which can
+	// then change them before the response is written.
+	// CloudFront Functions are not invoked for origin responses with a 4xx/5xx
+	// status, unless a custom error response rewrote the status below 400.
+	if fromOrigin && beh.ViewerResponse != nil && resp.statusCode < 400 {
+		if !s.runViewerResponse(w, r, dist, beh, snap, viewerHeaders, resp, requestID) {
+			return // a 503 was already written
+		}
+	}
 	s.writeResponse(w, r, dist, beh, resp, requestID)
 }
 
