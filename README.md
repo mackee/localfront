@@ -40,12 +40,16 @@ localfront deliberately has **no management API**. Configuration is a CloudForma
 
 ### S3 origins (external object storage)
 
-localfront does not embed an object store. S3 origins are served by an **external S3-compatible storage** — [RustFS](https://github.com/rustfs/rustfs) is the reference companion (other S3-compatible stores such as MinIO should work as well). At request time, localfront acts as an **S3 API client**: it resolves the bucket from the origin's domain name and fetches objects with SigV4-signed `GetObject` / `HeadObject` calls against the configured endpoint, mapping S3 errors (`NoSuchKey`, `AccessDenied`, …) to the status codes CloudFront would return — which then feed custom error responses as usual.
+localfront does not embed an object store. S3 origins are served by an **external S3-compatible storage** — [RustFS](https://github.com/rustfs/rustfs) is the reference companion. At request time, localfront acts as an **S3 API client**: it resolves the bucket from the origin's domain name and fetches objects with SigV4-signed `GetObject` / `HeadObject` calls against the configured endpoint, mapping S3 errors (`NoSuchKey`, `AccessDenied`, …) to the status codes CloudFront would return — which then feed custom error responses as usual.
 
 - Origin domain names of the form `<bucket>.s3.<region>.amazonaws.com` are resolved to `<s3-endpoint>/<bucket>` (path-style), so templates written for production work unchanged.
 - Conditional and range requests are forwarded as S3 request parameters (`Range`, `If-None-Match`, …).
 - `AWS::CloudFront::OriginAccessControl` resources are accepted but not enforced — localfront always accesses the store with the credentials given at startup; bucket policies on the store side are not consulted.
 - Assets are uploaded directly to the store with the usual tooling (`aws s3 sync --endpoint-url …`); localfront is not involved in uploads.
+
+The Compose-backed examples use a pinned RustFS image. Set `LOCALFRONT_S3_IMAGE` to use another RustFS version or mirror for those examples; `LOCALFRONT_E2E_S3_IMAGE` affects only the Go end-to-end tests. An override image must expose the S3 API on port 9000 with the example credentials and provide `curl` plus a successful `GET /health` endpoint for Compose readiness. The seed container also waits for an authenticated S3 `ListBuckets` response.
+
+To update the pin, inspect the official tag with `docker buildx imagetools inspect rustfs/rustfs:<version>` and verify its multi-platform digest. Update `internal/testimage/image.go`, the standalone example Compose defaults, and the README commands together. The literal Compose and README references let those examples run without generated files; `go test ./internal/testimage` checks them for drift during the ordinary test run. Then run `go test -tags e2e ./e2e/...` and `task verify:examples` against the new image.
 
 ## Caching
 
@@ -84,7 +88,7 @@ The PoC **does not cache**. Cache policies are still interpreted — they determ
 > The CLI shown below is the planned interface; defaults may change.
 
 ```console
-$ docker run -d -p 9000:9000 rustfs/rustfs        # S3-compatible origin storage
+$ docker run -d -p 9000:9000 -e RUSTFS_ACCESS_KEY=rustfsadmin -e RUSTFS_SECRET_KEY=rustfsadmin rustfs/rustfs:1.0.1@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c
 $ go install github.com/mackee/localfront/cmd/localfront@latest
 $ localfront serve --template ./template.yaml \
     --listen        :8080 \
@@ -140,8 +144,11 @@ services:
       - /tmp
     depends_on: [rustfs]
   rustfs:
-    image: rustfs/rustfs
+    image: rustfs/rustfs:1.0.1@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c
     ports: ["9000:9000"]
+    environment:
+      RUSTFS_ACCESS_KEY: rustfsadmin
+      RUSTFS_SECRET_KEY: rustfsadmin
 ```
 
 For repeatable flags via environment, separate entries with commas: `LOCALFRONT_TEMPLATE=/etc/localfront/a.yaml,/etc/localfront/b.yaml`, `LOCALFRONT_KVS_SEED=storeA=/etc/localfront/seeds/a.json,storeB=/etc/localfront/seeds/b.json`.
