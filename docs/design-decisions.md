@@ -132,7 +132,7 @@ bucket 名が intrinsic で組み立てられている場合はフォールバ�
 - **結果判定**: viewer-response は常に response。viewer-request は `statusCode` を持てば response（短絡）、無ければ request。
 - **エラー → 503**: JS 例外・エンジンエラーは CloudFront 互換 503。サイズ/実行時間の上限は PoC では非強制（警告のみ）。
 - **KVS**: インメモリ。`ImportSource`（S3 ARN をストアから取得）と `--kvs-seed <store>=<file>`（Name または logical ID で一致）。`--kvs-seed` が一致したストアは ImportSource を**フェッチせず**シードで置き換える（オフライン／`--s3-endpoint` 無しでも本番 import の代替として使える。起動時・リロード時とも同様）。シードは AWS bulk 形式 `{"data":[{key,value}]}` とフラット `{key:value}` の両方を受理。
-- **パイプライン位置**: viewer-request は behavior 解決・メソッドチェック後、`BuildOriginRequest` の前（**behavior 再評価なし** — fidelity note 8）。viewer-response はオリジン取得・custom error responses の後、response headers policy の前。function 追加ヘッダのオリジン到達は origin request policy のフィルタ対象（fidelity note 13）。
+- **パイプライン位置**: viewer-request は behavior 解決・メソッドチェック後、`BuildOriginRequest` の前（**behavior 再評価なし** — fidelity note 8）。viewer-response はオリジン取得・custom error responses・response headers policy の後（AWS 公式ブログ「policy のヘッダはキャッシュを出た後、viewer response イベントの前に挿入される」に従う。function は policy 適用済みのヘッダを読み・変更・削除できる — fidelity note 17）。function 追加ヘッダのオリジン到達は origin request policy のフィルタ対象（fidelity note 13）。
 
 ## M6: 署名付き URL / Cookie 検証（2026-06 確定）
 

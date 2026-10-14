@@ -48,8 +48,8 @@ viewer request
   → cache policy / origin request policy からオリジンリクエストを構築
   → オリジン fetch (custom HTTP / S3 API)
   → エラー時: custom error responses 適用
-  → CloudFront Functions (viewer-response)
   → response headers policy 適用
+  → CloudFront Functions (viewer-response)
   → Compress (gzip / brotli)
   → CloudFront ヘッダ付与 (X-Amz-Cf-Id, X-Cache, Via, ...)
 ```
