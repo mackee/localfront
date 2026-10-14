@@ -84,7 +84,7 @@ The PoC **does not cache**. Cache policies are still interpreted — they determ
 > The CLI shown below is the planned interface; defaults may change.
 
 ```console
-$ docker run -d -p 9000:9000 rustfs/rustfs        # S3-compatible origin storage
+$ docker run -d -p 9000:9000 -e RUSTFS_ACCESS_KEY=rustfsadmin -e RUSTFS_SECRET_KEY=rustfsadmin rustfs/rustfs:1.0.1@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c
 $ go install github.com/mackee/localfront/cmd/localfront@latest
 $ localfront serve --template ./template.yaml \
     --listen        :8080 \
@@ -140,8 +140,11 @@ services:
       - /tmp
     depends_on: [rustfs]
   rustfs:
-    image: rustfs/rustfs
+    image: rustfs/rustfs:1.0.1@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c
     ports: ["9000:9000"]
+    environment:
+      RUSTFS_ACCESS_KEY: rustfsadmin
+      RUSTFS_SECRET_KEY: rustfsadmin
 ```
 
 For repeatable flags via environment, separate entries with commas: `LOCALFRONT_TEMPLATE=/etc/localfront/a.yaml,/etc/localfront/b.yaml`, `LOCALFRONT_KVS_SEED=storeA=/etc/localfront/seeds/a.json,storeB=/etc/localfront/seeds/b.json`.

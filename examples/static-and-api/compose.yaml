@@ -7,36 +7,46 @@ name: localfront-static-and-api
 
 services:
   rustfs:
-    image: ${LOCALFRONT_E2E_S3_IMAGE:-rustfs/rustfs:latest}
+    image: rustfs/rustfs:1.0.1@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c
     environment:
       RUSTFS_ACCESS_KEY: rustfsadmin
       RUSTFS_SECRET_KEY: rustfsadmin
-      MINIO_ROOT_USER: rustfsadmin
-      MINIO_ROOT_PASSWORD: rustfsadmin
     ports:
       - "9000:9000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:9000/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
 
   # Stand-in API backend for the /api/* cache behavior.
   backend:
-    image: hashicorp/http-echo:latest
+    image: hashicorp/http-echo:1.0.0@sha256:fcb75f691c8b0414d670ae570240cbf95502cc18a9ba57e982ecac589760a186
     command: ["-text=api-backend", "-listen=:3000"]
     ports:
       - "3000:3000"
 
   # One-shot uploader (excluded from `up` by its profile; run explicitly).
   seed:
-    image: minio/mc:latest
+    image: amazon/aws-cli:2.31.18@sha256:1a491b258590cc66866cd550f592edff80082f44daf1d903820daeca2f4954de
     profiles: [seed]
-    depends_on: [rustfs]
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: rustfsadmin
+      AWS_SECRET_ACCESS_KEY: rustfsadmin
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_EC2_METADATA_DISABLED: "true"
+      NO_PROXY: rustfs
+      no_proxy: rustfs
     volumes:
       - ./public:/assets:ro
     entrypoint:
-      - sh
+      - /bin/sh
       - -c
       - |
-        until mc alias set local http://rustfs:9000 rustfsadmin rustfsadmin && mc ls local >/dev/null 2>&1; do
-          echo "waiting for the object store..."; sleep 1;
-        done
-        mc mb local/site-assets 2>/dev/null || true
-        mc cp --recursive /assets/ local/site-assets/
+        set -e
+        aws --endpoint-url http://rustfs:9000 s3api head-bucket --bucket site-assets 2>/dev/null || aws --endpoint-url http://rustfs:9000 s3 mb s3://site-assets
+        aws --endpoint-url http://rustfs:9000 s3 cp /assets/ s3://site-assets/ --recursive
         echo "seeded site-assets"

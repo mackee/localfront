@@ -8,8 +8,7 @@
 //	go test -tags e2e ./e2e/...
 //
 // The store image is configurable via LOCALFRONT_E2E_S3_IMAGE (default
-// rustfs/rustfs:latest), so a MinIO-compatible image can be substituted when
-// the default is unavailable. Containers are managed with ory/dockertest; the
+// a digest-pinned RustFS image). Containers are managed with ory/dockertest; the
 // whole package is behind the e2e build tag, so these dependencies are never
 // compiled into the localfront binary or fetched by `go install`.
 package e2e
@@ -48,7 +47,13 @@ const (
 func s3Image() (repository, tag string) {
 	image := os.Getenv("LOCALFRONT_E2E_S3_IMAGE")
 	if image == "" {
-		image = "rustfs/rustfs:latest"
+		image = "rustfs/rustfs:1.0.1@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c"
+	}
+	if name, digest, ok := strings.Cut(image, "@sha256:"); ok {
+		if i := strings.LastIndex(name, ":"); i > strings.LastIndex(name, "/") {
+			return name[:i], name[i+1:] + "@sha256:" + digest
+		}
+		return name, "latest@sha256:" + digest
 	}
 	if i := strings.LastIndex(image, ":"); i > strings.LastIndex(image, "/") {
 		return image[:i], image[i+1:]
@@ -87,8 +92,6 @@ func startStore(t *testing.T) *store {
 		Env: []string{
 			"RUSTFS_ACCESS_KEY=" + accessKey,
 			"RUSTFS_SECRET_KEY=" + secretKey,
-			"MINIO_ROOT_USER=" + accessKey,
-			"MINIO_ROOT_PASSWORD=" + secretKey,
 		},
 	}, func(hc *dc.HostConfig) {
 		hc.AutoRemove = true

@@ -11,7 +11,7 @@
 - フットプリントの懸念は過大評価だった: e2e は `//go:build e2e` かつ `cmd/localfront` の import グラフ外なので、コンテナ系ライブラリの依存は **`go install .../cmd/localfront@latest` では取得もビルドもされない**。残コストは「ルート `go.mod` の require に載る」「`go test ./...` で取得される」だけ。
 - そこで ory/dockertest に切り替えた。testcontainers-go より軽量で、`pool.Retry()`(readiness リトライ)・`pool.Purge()` / `resource.Expire()`(cleanup)・`GetHostPort()`(ポート解決)が手書きロジックを置き換える。Docker daemon API を直接叩くので `docker` CLI が PATH に無くても動く。
 - 依存の置き場所は**同一モジュール**（ルート `go.mod`）。ネストモジュールにすると `go test ./...` が e2e を再帰しなくなり CI/ローカル実行が二重管理になるため避けた。
-- イメージは `LOCALFRONT_E2E_S3_IMAGE` で差し替え可能（MinIO 互換へのフォールバック）。Docker 不在時は `dockertest.NewPool` / `Ping` 失敗で `t.Skip`。
+- デフォルトは digest 固定の公式 RustFS イメージ。`LOCALFRONT_E2E_S3_IMAGE` で差し替え可能。Docker 不在時は `dockertest.NewPool` / `Ping` 失敗で `t.Skip`。
 - フィクスチャ投入（バケット作成・オブジェクト PUT）は S3 クライアントと同じ aws-sdk-go-v2 SigV4 署名器を流用。空ボディは `Content-Length: 0` 明示、書き込みは 503 リトライ付き。
 
 ## examples の検証: runn（aqua 管理の CLI）（2026-06 確定）
@@ -23,7 +23,7 @@
 - **ホストルーティング**: localfront は Host ヘッダで distribution を解決する。runn の HTTP runner は `headers.Host` を `req.Host` に反映する（`http.go`）ので、各ステップで `Host: <alias>` を指定すればローカルの 127.0.0.1:port 宛でも正しい distribution に届く。
 - **オーケストレーション（2 方式）**:
   - **カスタムオリジンの例**（functions / cors-security）: 依存が軽いので e2e Go テスト（`e2e/examples_runn_test.go`、`e2e` タグ）が httptest の echo オリジン + localfront を起動し、`LF_ENDPOINT` を渡して `runn run scenario.yaml` を実行（CWD をシナリオのディレクトリにして runn の `read:parent` scope を回避）。**Docker 不要**。オリジンのポートだけ環境依存なのでテンプレートの `HTTPPort: 3000` を実ポートに置換する（テンプレートの構造・Function・ポリシーはそのまま検証対象）。
-  - **S3 を要する例**（spa-hosting / static-and-api）: 各例に `compose.yaml`（RustFS + mc シード、static-and-api は `http-echo` バックエンドも）を同梱し、`scripts/verify-example.sh`（`task verify:spa` / `verify:static-and-api` が起動）が compose up → シード → localfront をホストで起動 → `runn run` → teardown する。README の「依存は Docker、localfront はホスト」という使い方そのままを検証する。
+  - **S3 を要する例**（spa-hosting / static-and-api / wildcard-subdomain-s3）: 各例に `compose.yaml`（digest 固定の RustFS + 公式 AWS CLI によるシード、static-and-api は `http-echo` バックエンドも）を同梱し、`scripts/verify-example.sh`（`task verify:examples` が起動）が compose up → シード → localfront をホストで起動 → `runn run` → teardown する。README の「依存は Docker、localfront はホスト」という使い方そのままを検証する。
 - **runn が無いとき**: Go テストは `t.Skip`。
 - **タスクランナー**: Makefile を廃し [Taskfile](https://taskfile.dev)（`Taskfile.yml`、`go-task/task` も aqua 管理）に統一。`task build/test/e2e/lint/verify:examples`。CI の e2e ジョブは aqua で task/runn を入れ、`go test -tags e2e` と `task verify:examples` の両方を実行する。
 
