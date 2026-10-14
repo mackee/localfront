@@ -41,20 +41,11 @@ const (
 	accessKey = "rustfsadmin"
 	secretKey = "rustfsadmin"
 	region    = "us-east-1"
+	rustfsRef = "rustfs/rustfs@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c"
 )
 
-// s3Image returns the store image repository and tag.
-func s3Image() (repository, tag string) {
-	image := os.Getenv("LOCALFRONT_E2E_S3_IMAGE")
-	if image == "" {
-		image = "rustfs/rustfs:1.0.1@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c"
-	}
-	if name, digest, ok := strings.Cut(image, "@sha256:"); ok {
-		if i := strings.LastIndex(name, ":"); i > strings.LastIndex(name, "/") {
-			return name[:i], name[i+1:] + "@sha256:" + digest
-		}
-		return name, "latest@sha256:" + digest
-	}
+// s3Image splits an optional override into the repository and tag expected by dockertest.
+func s3Image(image string) (repository, tag string) {
 	if i := strings.LastIndex(image, ":"); i > strings.LastIndex(image, "/") {
 		return image[:i], image[i+1:]
 	}
@@ -84,7 +75,19 @@ func startStore(t *testing.T) *store {
 	}
 	pool.MaxWait = 90 * time.Second
 
-	repository, tag := s3Image()
+	image := os.Getenv("LOCALFRONT_E2E_S3_IMAGE")
+	if image == "" {
+		// dockertest cannot pull a tag@digest reference. Pull the exact digest
+		// through Docker's API, then give it a local tag for dockertest to run.
+		if err := pool.Client.PullImage(dc.PullImageOptions{Repository: rustfsRef}, dc.AuthConfiguration{}); err != nil {
+			t.Fatalf("pulling %s: %v", rustfsRef, err)
+		}
+		if err := pool.Client.TagImage(rustfsRef, dc.TagImageOptions{Repo: "localfront-e2e-rustfs", Tag: "1.0.1"}); err != nil {
+			t.Fatalf("tagging %s for dockertest: %v", rustfsRef, err)
+		}
+		image = "localfront-e2e-rustfs:1.0.1"
+	}
+	repository, tag := s3Image(image)
 	resource, err := pool.RunWithOptions(&dockertest.RunOptions{
 		Repository:   repository,
 		Tag:          tag,
