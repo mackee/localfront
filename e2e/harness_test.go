@@ -8,8 +8,7 @@
 //	go test -tags e2e ./e2e/...
 //
 // The store image is configurable via LOCALFRONT_E2E_S3_IMAGE (default
-// rustfs/rustfs:latest), so a MinIO-compatible image can be substituted when
-// the default is unavailable. Containers are managed with ory/dockertest; the
+// a digest-pinned RustFS image). Containers are managed with ory/dockertest; the
 // whole package is behind the e2e build tag, so these dependencies are never
 // compiled into the localfront binary or fetched by `go install`.
 package e2e
@@ -19,6 +18,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,6 +34,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
+	"github.com/mackee/localfront/internal/testimage"
 	"github.com/ory/dockertest/v3"
 	dc "github.com/ory/dockertest/v3/docker"
 )
@@ -44,16 +45,75 @@ const (
 	region    = "us-east-1"
 )
 
-// s3Image returns the store image repository and tag.
-func s3Image() (repository, tag string) {
-	image := os.Getenv("LOCALFRONT_E2E_S3_IMAGE")
-	if image == "" {
-		image = "rustfs/rustfs:latest"
+type imageClient interface {
+	InspectImage(string) (*dc.Image, error)
+	PullImage(dc.PullImageOptions, dc.AuthConfiguration) error
+	TagImage(string, dc.TagImageOptions) error
+}
+
+type s3ImageSpec struct {
+	ref, repository, tag, digest string
+}
+
+func parseS3Image(ref string) (s3ImageSpec, error) {
+	if ref == "" {
+		return s3ImageSpec{}, errors.New("empty S3 image reference")
 	}
-	if i := strings.LastIndex(image, ":"); i > strings.LastIndex(image, "/") {
-		return image[:i], image[i+1:]
+	if name, digest, ok := strings.Cut(ref, "@"); ok {
+		hexDigest, ok := strings.CutPrefix(digest, "sha256:")
+		if !ok || len(hexDigest) != 64 {
+			return s3ImageSpec{}, fmt.Errorf("unsupported S3 image digest: %s", digest)
+		}
+		if _, err := hex.DecodeString(hexDigest); err != nil {
+			return s3ImageSpec{}, fmt.Errorf("invalid S3 image digest: %w", err)
+		}
+		if hexDigest != strings.ToLower(hexDigest) {
+			return s3ImageSpec{}, errors.New("S3 image digest must use lowercase hex")
+		}
+		if i := strings.LastIndex(name, ":"); i > strings.LastIndex(name, "/") {
+			name = name[:i]
+		}
+		if name == "" {
+			return s3ImageSpec{}, errors.New("empty S3 image repository")
+		}
+		return s3ImageSpec{ref: name + "@" + digest, repository: name, digest: hexDigest}, nil
 	}
-	return image, "latest"
+	if i := strings.LastIndex(ref, ":"); i > strings.LastIndex(ref, "/") {
+		return s3ImageSpec{ref: ref, repository: ref[:i], tag: ref[i+1:]}, nil
+	}
+	return s3ImageSpec{ref: ref + ":latest", repository: ref, tag: "latest"}, nil
+}
+
+// prepareS3Image checks the local cache before pulling. dockertest requires a
+// repository:tag, so digest references get a content-derived local tag.
+func prepareS3Image(client imageClient, ref string) (repository, tag string, err error) {
+	spec, err := parseS3Image(ref)
+	if err != nil {
+		return "", "", err
+	}
+	img, err := client.InspectImage(spec.ref)
+	if errors.Is(err, dc.ErrNoSuchImage) {
+		pull := dc.PullImageOptions{Repository: spec.repository, Tag: spec.tag}
+		if spec.digest != "" {
+			pull = dc.PullImageOptions{Repository: spec.ref}
+		}
+		if err := client.PullImage(pull, dc.AuthConfiguration{}); err != nil {
+			return "", "", fmt.Errorf("pulling %s: %w", spec.ref, err)
+		}
+		img, err = client.InspectImage(spec.ref)
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("inspecting %s: %w", spec.ref, err)
+	}
+	if spec.digest == "" {
+		return spec.repository, spec.tag, nil
+	}
+	const localRepo = "localfront-e2e-s3"
+	localTag := "sha256-" + spec.digest
+	if err := client.TagImage(img.ID, dc.TagImageOptions{Repo: localRepo, Tag: localTag, Force: true}); err != nil {
+		return "", "", fmt.Errorf("tagging %s: %w", spec.ref, err)
+	}
+	return localRepo, localTag, nil
 }
 
 // store is a running S3-compatible object store.
@@ -79,7 +139,14 @@ func startStore(t *testing.T) *store {
 	}
 	pool.MaxWait = 90 * time.Second
 
-	repository, tag := s3Image()
+	image := os.Getenv("LOCALFRONT_E2E_S3_IMAGE")
+	if image == "" {
+		image = testimage.RustFS
+	}
+	repository, tag, err := prepareS3Image(pool.Client, image)
+	if err != nil {
+		t.Fatalf("preparing object store image: %v", err)
+	}
 	resource, err := pool.RunWithOptions(&dockertest.RunOptions{
 		Repository:   repository,
 		Tag:          tag,
@@ -87,8 +154,6 @@ func startStore(t *testing.T) *store {
 		Env: []string{
 			"RUSTFS_ACCESS_KEY=" + accessKey,
 			"RUSTFS_SECRET_KEY=" + secretKey,
-			"MINIO_ROOT_USER=" + accessKey,
-			"MINIO_ROOT_PASSWORD=" + secretKey,
 		},
 	}, func(hc *dc.HostConfig) {
 		hc.AutoRemove = true
