@@ -47,6 +47,10 @@ localfront does not embed an object store. S3 origins are served by an **externa
 - `AWS::CloudFront::OriginAccessControl` resources are accepted but not enforced — localfront always accesses the store with the credentials given at startup; bucket policies on the store side are not consulted.
 - Assets are uploaded directly to the store with the usual tooling (`aws s3 sync --endpoint-url …`); localfront is not involved in uploads.
 
+The Compose-backed examples use a pinned RustFS image. Set `LOCALFRONT_S3_IMAGE` to use another RustFS version or mirror for those examples; `LOCALFRONT_E2E_S3_IMAGE` affects only the Go end-to-end tests. An override image must expose the S3 API on port 9000 with the example credentials and provide `curl` plus a successful `GET /health` endpoint for Compose readiness. The seed container also waits for an authenticated S3 `ListBuckets` response.
+
+To update the pin, inspect the official tag with `docker buildx imagetools inspect rustfs/rustfs:<version>` and verify its multi-platform digest. Update `internal/testimage/image.go`, the standalone example Compose defaults, and the README commands together. The literal Compose and README references let those examples run without generated files; `go test ./internal/testimage` checks them for drift during the ordinary test run. Then run `go test -tags e2e ./e2e/...` and `task verify:examples` against the new image.
+
 ## Caching
 
 The PoC **does not cache**. Cache policies are still interpreted — they determine the cache key and therefore which headers, cookies, and query strings reach your origin — but every request is forwarded and answered with `X-Cache: Miss from localfront`. This keeps local behavior deterministic in tests. An optional in-memory cache (honoring cache policies and TTLs, with `X-Cache: Hit` and a purge command) is on the roadmap.

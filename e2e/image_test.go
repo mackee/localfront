@@ -4,8 +4,6 @@ package e2e
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -72,10 +70,13 @@ func TestParseS3Image(t *testing.T) {
 			}
 		})
 	}
-	for _, ref := range []string{"", "rustfs/rustfs@sha256:bad", "rustfs/rustfs@md5:abcd"} {
+	for _, ref := range []string{"", "rustfs/rustfs@sha256:bad", "rustfs/rustfs@md5:abcd", "rustfs/rustfs@sha256:1803FAEF57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c"} {
 		if _, err := parseS3Image(ref); err == nil {
 			t.Errorf("parseS3Image(%q) unexpectedly succeeded", ref)
 		}
+	}
+	if _, err := parseS3Image("rustfs/rustfs@sha256:1803FAEF57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c"); err == nil || !strings.Contains(err.Error(), "lowercase") {
+		t.Errorf("uppercase digest error = %v, want lowercase guidance", err)
 	}
 }
 
@@ -97,21 +98,21 @@ func TestPrepareS3Image(t *testing.T) {
 			t.Fatalf("err=%v pulls=%v", err, f.pulls)
 		}
 	})
-	t.Run("cached local tag is reused", func(t *testing.T) {
+	t.Run("cached local tag is refreshed", func(t *testing.T) {
 		f := &fakeImageClient{images: map[string]*dc.Image{
 			digestRef: {ID: "cached"}, "localfront-e2e-s3:" + localTag: {ID: "cached"},
 		}}
 		_, _, err := prepareS3Image(f, digestRef)
-		if err != nil || len(f.tags) != 0 || len(f.pulls) != 0 {
+		if err != nil || len(f.tags) != 1 || !f.tags[0].Force || len(f.pulls) != 0 {
 			t.Fatalf("err=%v pulls=%v tags=%v", err, f.pulls, f.tags)
 		}
 	})
-	t.Run("different local image fails", func(t *testing.T) {
+	t.Run("different local image is retagged", func(t *testing.T) {
 		f := &fakeImageClient{images: map[string]*dc.Image{
 			digestRef: {ID: "correct"}, "localfront-e2e-s3:" + localTag: {ID: "different"},
 		}}
-		if _, _, err := prepareS3Image(f, digestRef); err == nil {
-			t.Fatal("mismatched local tag accepted")
+		if _, _, err := prepareS3Image(f, digestRef); err != nil || f.images["localfront-e2e-s3:"+localTag].ID != "correct" || len(f.tags) != 1 || !f.tags[0].Force {
+			t.Fatalf("local tag was not replaced: err=%v tags=%v", err, f.tags)
 		}
 	})
 	t.Run("tag override pulls on missing image", func(t *testing.T) {
@@ -133,23 +134,4 @@ func TestPrepareS3Image(t *testing.T) {
 			t.Fatalf("err=%v pulls=%v", err, f.pulls)
 		}
 	})
-}
-
-func TestDefaultS3ImageReferencesStayAligned(t *testing.T) {
-	for _, name := range []string{"spa-hosting", "static-and-api", "wildcard-subdomain-s3"} {
-		body, err := os.ReadFile(filepath.Join("..", "examples", name, "compose.yaml"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(string(body), "${LOCALFRONT_E2E_S3_IMAGE:-"+defaultS3Image+"}") {
-			t.Errorf("%s default RustFS image differs from e2e", name)
-		}
-	}
-	readme, err := os.ReadFile("../README.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if count := strings.Count(string(readme), defaultS3Image); count != 2 {
-		t.Errorf("README contains default RustFS image %d times, want 2", count)
-	}
 }

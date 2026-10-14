@@ -11,7 +11,7 @@
 - フットプリントの懸念は過大評価だった: e2e は `//go:build e2e` かつ `cmd/localfront` の import グラフ外なので、コンテナ系ライブラリの依存は **`go install .../cmd/localfront@latest` では取得もビルドもされない**。残コストは「ルート `go.mod` の require に載る」「`go test ./...` で取得される」だけ。
 - そこで ory/dockertest に切り替えた。testcontainers-go より軽量で、`pool.Retry()`(readiness リトライ)・`pool.Purge()` / `resource.Expire()`(cleanup)・`GetHostPort()`(ポート解決)が手書きロジックを置き換える。Docker daemon API を直接叩くので `docker` CLI が PATH に無くても動く。
 - 依存の置き場所は**同一モジュール**（ルート `go.mod`）。ネストモジュールにすると `go test ./...` が e2e を再帰しなくなり CI/ローカル実行が二重管理になるため避けた。
-- デフォルトは digest 固定の公式 RustFS イメージ。`LOCALFRONT_E2E_S3_IMAGE` で差し替え可能。Docker 不在時は `dockertest.NewPool` / `Ping` 失敗で `t.Skip`。
+- デフォルトは digest 固定の公式 RustFS イメージ。Go e2e は `LOCALFRONT_E2E_S3_IMAGE`、Compose の例は別の `LOCALFRONT_S3_IMAGE` で RustFS バージョンやミラーに差し替え可能。Docker 不在時は `dockertest.NewPool` / `Ping` 失敗で `t.Skip`。
 - フィクスチャ投入（バケット作成・オブジェクト PUT）は S3 クライアントと同じ aws-sdk-go-v2 SigV4 署名器を流用。空ボディは `Content-Length: 0` 明示、書き込みは 503 リトライ付き。
 
 ## examples の検証: runn（aqua 管理の CLI）（2026-06 確定）

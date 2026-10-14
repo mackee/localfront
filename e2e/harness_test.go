@@ -34,15 +34,15 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
+	"github.com/mackee/localfront/internal/testimage"
 	"github.com/ory/dockertest/v3"
 	dc "github.com/ory/dockertest/v3/docker"
 )
 
 const (
-	accessKey      = "rustfsadmin"
-	secretKey      = "rustfsadmin"
-	region         = "us-east-1"
-	defaultS3Image = "rustfs/rustfs:1.0.1@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c"
+	accessKey = "rustfsadmin"
+	secretKey = "rustfsadmin"
+	region    = "us-east-1"
 )
 
 type imageClient interface {
@@ -66,6 +66,9 @@ func parseS3Image(ref string) (s3ImageSpec, error) {
 		}
 		if _, err := hex.DecodeString(hexDigest); err != nil {
 			return s3ImageSpec{}, fmt.Errorf("invalid S3 image digest: %w", err)
+		}
+		if hexDigest != strings.ToLower(hexDigest) {
+			return s3ImageSpec{}, errors.New("S3 image digest must use lowercase hex")
 		}
 		if i := strings.LastIndex(name, ":"); i > strings.LastIndex(name, "/") {
 			name = name[:i]
@@ -107,16 +110,8 @@ func prepareS3Image(client imageClient, ref string) (repository, tag string, err
 	}
 	const localRepo = "localfront-e2e-s3"
 	localTag := "sha256-" + spec.digest
-	localRef := localRepo + ":" + localTag
-	localImage, err := client.InspectImage(localRef)
-	if errors.Is(err, dc.ErrNoSuchImage) {
-		if err := client.TagImage(img.ID, dc.TagImageOptions{Repo: localRepo, Tag: localTag}); err != nil {
-			return "", "", fmt.Errorf("tagging %s: %w", spec.ref, err)
-		}
-	} else if err != nil {
-		return "", "", fmt.Errorf("inspecting %s: %w", localRef, err)
-	} else if localImage.ID != img.ID {
-		return "", "", fmt.Errorf("local tag %s points to a different image", localRef)
+	if err := client.TagImage(img.ID, dc.TagImageOptions{Repo: localRepo, Tag: localTag, Force: true}); err != nil {
+		return "", "", fmt.Errorf("tagging %s: %w", spec.ref, err)
 	}
 	return localRepo, localTag, nil
 }
@@ -146,7 +141,7 @@ func startStore(t *testing.T) *store {
 
 	image := os.Getenv("LOCALFRONT_E2E_S3_IMAGE")
 	if image == "" {
-		image = defaultS3Image
+		image = testimage.RustFS
 	}
 	repository, tag, err := prepareS3Image(pool.Client, image)
 	if err != nil {

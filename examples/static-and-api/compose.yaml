@@ -7,12 +7,17 @@ name: localfront-static-and-api
 
 services:
   rustfs:
-    image: ${LOCALFRONT_E2E_S3_IMAGE:-rustfs/rustfs:1.0.1@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c}
+    image: ${LOCALFRONT_S3_IMAGE:-rustfs/rustfs:1.0.1@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c}
     environment:
       RUSTFS_ACCESS_KEY: rustfsadmin
       RUSTFS_SECRET_KEY: rustfsadmin
     ports:
       - "9000:9000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:9000/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
 
   # Stand-in API backend for the /api/* cache behavior.
   backend:
@@ -25,7 +30,9 @@ services:
   seed:
     image: amazon/aws-cli:2.31.18@sha256:1a491b258590cc66866cd550f592edff80082f44daf1d903820daeca2f4954de
     profiles: [seed]
-    depends_on: [rustfs]
+    depends_on:
+      rustfs:
+        condition: service_healthy
     environment:
       AWS_ACCESS_KEY_ID: rustfsadmin
       AWS_SECRET_ACCESS_KEY: rustfsadmin
@@ -42,9 +49,13 @@ services:
       - |
         set -e
         attempt=0
-        until aws s3api list-buckets >/dev/null 2>&1; do
+        until aws s3api list-buckets >/dev/null 2>/tmp/readiness-error; do
           attempt=$$((attempt + 1))
-          if [ "$$attempt" -ge 30 ]; then echo "object store did not become ready" >&2; exit 1; fi
+          if [ "$$attempt" -ge 30 ]; then
+            cat /tmp/readiness-error >&2
+            echo "object store did not become ready" >&2
+            exit 1
+          fi
           sleep 1
         done
         aws s3api head-bucket --bucket site-assets 2>/dev/null || aws s3 mb s3://site-assets
