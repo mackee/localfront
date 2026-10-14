@@ -40,7 +40,7 @@ localfront deliberately has **no management API**. Configuration is a CloudForma
 
 ### S3 origins (external object storage)
 
-localfront does not embed an object store. S3 origins are served by an **external S3-compatible storage** — [RustFS](https://github.com/rustfs/rustfs) is the reference companion (other S3-compatible stores such as MinIO should work as well). At request time, localfront acts as an **S3 API client**: it resolves the bucket from the origin's domain name and fetches objects with SigV4-signed `GetObject` / `HeadObject` calls against the configured endpoint, mapping S3 errors (`NoSuchKey`, `AccessDenied`, …) to the status codes CloudFront would return — which then feed custom error responses as usual.
+localfront does not embed an object store. S3 origins are served by an **external S3-compatible storage** — [RustFS](https://github.com/rustfs/rustfs) is the reference companion. At request time, localfront acts as an **S3 API client**: it resolves the bucket from the origin's domain name and fetches objects with SigV4-signed `GetObject` / `HeadObject` calls against the configured endpoint, mapping S3 errors (`NoSuchKey`, `AccessDenied`, …) to the status codes CloudFront would return — which then feed custom error responses as usual.
 
 - Origin domain names of the form `<bucket>.s3.<region>.amazonaws.com` are resolved to `<s3-endpoint>/<bucket>` (path-style), so templates written for production work unchanged.
 - Conditional and range requests are forwarded as S3 request parameters (`Range`, `If-None-Match`, …).

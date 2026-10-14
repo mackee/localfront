@@ -23,7 +23,7 @@
 - **ホストルーティング**: localfront は Host ヘッダで distribution を解決する。runn の HTTP runner は `headers.Host` を `req.Host` に反映する（`http.go`）ので、各ステップで `Host: <alias>` を指定すればローカルの 127.0.0.1:port 宛でも正しい distribution に届く。
 - **オーケストレーション（2 方式）**:
   - **カスタムオリジンの例**（functions / cors-security）: 依存が軽いので e2e Go テスト（`e2e/examples_runn_test.go`、`e2e` タグ）が httptest の echo オリジン + localfront を起動し、`LF_ENDPOINT` を渡して `runn run scenario.yaml` を実行（CWD をシナリオのディレクトリにして runn の `read:parent` scope を回避）。**Docker 不要**。オリジンのポートだけ環境依存なのでテンプレートの `HTTPPort: 3000` を実ポートに置換する（テンプレートの構造・Function・ポリシーはそのまま検証対象）。
-  - **S3 を要する例**（spa-hosting / static-and-api / wildcard-subdomain-s3）: 各例に `compose.yaml`（digest 固定の RustFS + 公式 AWS CLI によるシード、static-and-api は `http-echo` バックエンドも）を同梱し、`scripts/verify-example.sh`（`task verify:examples` が起動）が compose up → シード → localfront をホストで起動 → `runn run` → teardown する。README の「依存は Docker、localfront はホスト」という使い方そのままを検証する。
+  - **S3 を要する例**（spa-hosting / static-and-api / wildcard-subdomain-s3）: 各例に `compose.yaml`（digest 固定の RustFS + 公式 AWS CLI によるシード、static-and-api は `http-echo` バックエンドも）を同梱し、`scripts/verify-example.sh`（`task verify:examples` が起動）が compose up → シード → localfront をホストで起動 → `runn run` → teardown する。シード前の認証付き `ListBuckets` を回数制限付きで再試行し、RustFS イメージ差し替え時も S3 API の準備完了を確認する。README の「依存は Docker、localfront はホスト」という使い方そのままを検証する。
 - **runn が無いとき**: Go テストは `t.Skip`。
 - **タスクランナー**: Makefile を廃し [Taskfile](https://taskfile.dev)（`Taskfile.yml`、`go-task/task` も aqua 管理）に統一。`task build/test/e2e/lint/verify:examples`。CI の e2e ジョブは aqua で task/runn を入れ、`go test -tags e2e` と `task verify:examples` の両方を実行する。
 

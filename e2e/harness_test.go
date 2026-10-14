@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,18 +39,86 @@ import (
 )
 
 const (
-	accessKey = "rustfsadmin"
-	secretKey = "rustfsadmin"
-	region    = "us-east-1"
-	rustfsRef = "rustfs/rustfs@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c"
+	accessKey      = "rustfsadmin"
+	secretKey      = "rustfsadmin"
+	region         = "us-east-1"
+	defaultS3Image = "rustfs/rustfs:1.0.1@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c"
 )
 
-// s3Image splits an optional override into the repository and tag expected by dockertest.
-func s3Image(image string) (repository, tag string) {
-	if i := strings.LastIndex(image, ":"); i > strings.LastIndex(image, "/") {
-		return image[:i], image[i+1:]
+type imageClient interface {
+	InspectImage(string) (*dc.Image, error)
+	PullImage(dc.PullImageOptions, dc.AuthConfiguration) error
+	TagImage(string, dc.TagImageOptions) error
+}
+
+type s3ImageSpec struct {
+	ref, repository, tag, digest string
+}
+
+func parseS3Image(ref string) (s3ImageSpec, error) {
+	if ref == "" {
+		return s3ImageSpec{}, errors.New("empty S3 image reference")
 	}
-	return image, "latest"
+	if name, digest, ok := strings.Cut(ref, "@"); ok {
+		hexDigest, ok := strings.CutPrefix(digest, "sha256:")
+		if !ok || len(hexDigest) != 64 {
+			return s3ImageSpec{}, fmt.Errorf("unsupported S3 image digest: %s", digest)
+		}
+		if _, err := hex.DecodeString(hexDigest); err != nil {
+			return s3ImageSpec{}, fmt.Errorf("invalid S3 image digest: %w", err)
+		}
+		if i := strings.LastIndex(name, ":"); i > strings.LastIndex(name, "/") {
+			name = name[:i]
+		}
+		if name == "" {
+			return s3ImageSpec{}, errors.New("empty S3 image repository")
+		}
+		return s3ImageSpec{ref: name + "@" + digest, repository: name, digest: hexDigest}, nil
+	}
+	if i := strings.LastIndex(ref, ":"); i > strings.LastIndex(ref, "/") {
+		return s3ImageSpec{ref: ref, repository: ref[:i], tag: ref[i+1:]}, nil
+	}
+	return s3ImageSpec{ref: ref + ":latest", repository: ref, tag: "latest"}, nil
+}
+
+// prepareS3Image checks the local cache before pulling. dockertest requires a
+// repository:tag, so digest references get a content-derived local tag.
+func prepareS3Image(client imageClient, ref string) (repository, tag string, err error) {
+	spec, err := parseS3Image(ref)
+	if err != nil {
+		return "", "", err
+	}
+	img, err := client.InspectImage(spec.ref)
+	if errors.Is(err, dc.ErrNoSuchImage) {
+		pull := dc.PullImageOptions{Repository: spec.repository, Tag: spec.tag}
+		if spec.digest != "" {
+			pull = dc.PullImageOptions{Repository: spec.ref}
+		}
+		if err := client.PullImage(pull, dc.AuthConfiguration{}); err != nil {
+			return "", "", fmt.Errorf("pulling %s: %w", spec.ref, err)
+		}
+		img, err = client.InspectImage(spec.ref)
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("inspecting %s: %w", spec.ref, err)
+	}
+	if spec.digest == "" {
+		return spec.repository, spec.tag, nil
+	}
+	const localRepo = "localfront-e2e-s3"
+	localTag := "sha256-" + spec.digest
+	localRef := localRepo + ":" + localTag
+	localImage, err := client.InspectImage(localRef)
+	if errors.Is(err, dc.ErrNoSuchImage) {
+		if err := client.TagImage(img.ID, dc.TagImageOptions{Repo: localRepo, Tag: localTag}); err != nil {
+			return "", "", fmt.Errorf("tagging %s: %w", spec.ref, err)
+		}
+	} else if err != nil {
+		return "", "", fmt.Errorf("inspecting %s: %w", localRef, err)
+	} else if localImage.ID != img.ID {
+		return "", "", fmt.Errorf("local tag %s points to a different image", localRef)
+	}
+	return localRepo, localTag, nil
 }
 
 // store is a running S3-compatible object store.
@@ -77,17 +146,12 @@ func startStore(t *testing.T) *store {
 
 	image := os.Getenv("LOCALFRONT_E2E_S3_IMAGE")
 	if image == "" {
-		// dockertest cannot pull a tag@digest reference. Pull the exact digest
-		// through Docker's API, then give it a local tag for dockertest to run.
-		if err := pool.Client.PullImage(dc.PullImageOptions{Repository: rustfsRef}, dc.AuthConfiguration{}); err != nil {
-			t.Fatalf("pulling %s: %v", rustfsRef, err)
-		}
-		if err := pool.Client.TagImage(rustfsRef, dc.TagImageOptions{Repo: "localfront-e2e-rustfs", Tag: "1.0.1"}); err != nil {
-			t.Fatalf("tagging %s for dockertest: %v", rustfsRef, err)
-		}
-		image = "localfront-e2e-rustfs:1.0.1"
+		image = defaultS3Image
 	}
-	repository, tag := s3Image(image)
+	repository, tag, err := prepareS3Image(pool.Client, image)
+	if err != nil {
+		t.Fatalf("preparing object store image: %v", err)
+	}
 	resource, err := pool.RunWithOptions(&dockertest.RunOptions{
 		Repository:   repository,
 		Tag:          tag,
