@@ -146,6 +146,82 @@ function handler(event) {
 	}
 }
 
+func TestM5_ResponseHeadersPolicyBeforeViewerResponse(t *testing.T) {
+	originSrv, host, port := newTestOriginServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "body")
+	})
+	_ = originSrv
+
+	tests := []struct {
+		name       string
+		code       string
+		wantPolicy string
+		wantSeen   string
+	}{
+		{
+			name: "function sees policy header",
+			code: `function handler(event) {
+				event.response.headers['x-seen'] = {
+					value: event.response.headers['x-policy'].value
+				};
+				return event.response;
+			}`,
+			wantPolicy: "policy",
+			wantSeen:   "policy",
+		},
+		{
+			name: "function overrides policy header",
+			code: `function handler(event) {
+				event.response.headers['x-policy'] = { value: 'function' };
+				return event.response;
+			}`,
+			wantPolicy: "function",
+		},
+		{
+			name:       "policy without function",
+			wantPolicy: "policy",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			o := customOrigin("o1", host, port)
+			beh := getHeadBehavior(o, "")
+			beh.ResponseHeadersPolicy = &config.ResponseHeadersPolicy{
+				CustomHeaders: []config.CustomHeader{{Name: "X-Policy", Value: "policy", Override: true}},
+			}
+			dist := &config.Distribution{
+				LogicalID: "D1", ID: "D1", DomainName: "d1.cloudfront.localhost",
+				Aliases: []string{"site.example.test"}, Enabled: true,
+				Origins: []*config.Origin{o}, DefaultBehavior: beh,
+			}
+			cfg := &config.Config{Distributions: []*config.Distribution{dist}}
+			funcs := map[string]*cffunc.Function{}
+			if tt.code != "" {
+				beh.ViewerResponse = &config.Function{LogicalID: "Resp", Name: "resp"}
+				funcs["Resp"] = mustCompileFn(t, "resp", tt.code, nil)
+			}
+			srv := dataplane.New(cfg, newLogger())
+			srv.Swap(cfg, funcs)
+
+			req := httptest.NewRequest(http.MethodGet, "http://site.example.test/", nil)
+			req.Host = "site.example.test"
+			rr := httptest.NewRecorder()
+			srv.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rr.Code)
+			}
+			if got := rr.Header().Get("X-Policy"); got != tt.wantPolicy {
+				t.Errorf("X-Policy = %q, want %q", got, tt.wantPolicy)
+			}
+			if got := rr.Header().Get("X-Seen"); got != tt.wantSeen {
+				t.Errorf("X-Seen = %q, want %q", got, tt.wantSeen)
+			}
+		})
+	}
+}
+
 // CloudFront Functions are not invoked for origin responses with a 4xx/5xx
 // status, so the viewer-response function must not run on an origin error.
 func TestM5_ViewerResponse_SkippedOnOriginError(t *testing.T) {
